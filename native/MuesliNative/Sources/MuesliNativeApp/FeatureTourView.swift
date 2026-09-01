@@ -84,9 +84,9 @@ struct FeatureTourCalloutLayout {
         switch target {
         case .timelineSidebar, .meetingsSidebar:
             return [.trailing, .leading, .below, .above]
-        case .timelineApplications, .appleSpeechCard, .meetingPeople, .timelineFilters, .modelLibrary, .insightsEntry, .liveCaptionsSetting, .dictationProviderSetting, .parakeetFamilyCard:
+        case .timelineApplications, .appleSpeechCard, .meetingPeople, .timelineFilters, .modelLibrary, .insightsEntry, .liveCaptionsSetting:
             return [.below, .above, .trailing, .leading]
-        case .dictionarySuggestions, .cloudCleanupSetting, .streamingModels, .experimentalModels, .quillSettings:
+        case .dictionarySuggestions, .cloudCleanupSetting, .streamingModels, .experimentalModels:
             return [.above, .below, .trailing, .leading]
         }
     }
@@ -175,7 +175,7 @@ extension View {
 struct FeatureTourOverlay: View {
     let tour: FeatureTour
     let stepIndex: Int
-    let spotlightRect: CGRect?
+    let spotlightRect: CGRect
     let containerSize: CGSize
     let onBack: () -> Void
     let onNext: () -> Void
@@ -188,8 +188,8 @@ struct FeatureTourOverlay: View {
         tour.steps[stepIndex]
     }
 
-    private var expandedSpotlight: CGRect? {
-        spotlightRect?.insetBy(dx: -8, dy: -8)
+    private var expandedSpotlight: CGRect {
+        spotlightRect.insetBy(dx: -8, dy: -8)
     }
 
     var body: some View {
@@ -197,24 +197,19 @@ struct FeatureTourOverlay: View {
             Color.clear
                 .contentShape(Rectangle())
 
-            if let expandedSpotlight {
-                FeatureTourDimmingShape(spotlight: expandedSpotlight, cornerRadius: 10)
-                    .fill(
-                        Color.black.opacity(0.72),
-                        style: FillStyle(eoFill: true, antialiased: true)
-                    )
-                    .allowsHitTesting(false)
+            FeatureTourDimmingShape(spotlight: expandedSpotlight, cornerRadius: 10)
+                .fill(
+                    Color.black.opacity(0.72),
+                    style: FillStyle(eoFill: true, antialiased: true)
+                )
+                .allowsHitTesting(false)
 
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(MuesliTheme.accent, lineWidth: 2)
-                    .frame(width: expandedSpotlight.width, height: expandedSpotlight.height)
-                    .position(x: expandedSpotlight.midX, y: expandedSpotlight.midY)
-                    .shadow(color: MuesliTheme.accent.opacity(0.55), radius: 10)
-                    .allowsHitTesting(false)
-            } else {
-                Color.black.opacity(0.72)
-                    .allowsHitTesting(false)
-            }
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(MuesliTheme.accent, lineWidth: 2)
+                .frame(width: expandedSpotlight.width, height: expandedSpotlight.height)
+                .position(x: expandedSpotlight.midX, y: expandedSpotlight.midY)
+                .shadow(color: MuesliTheme.accent.opacity(0.55), radius: 10)
+                .allowsHitTesting(false)
 
             callout
                 .frame(width: 380)
@@ -315,14 +310,11 @@ struct FeatureTourOverlay: View {
     }
 
     private var calloutPosition: CGPoint {
-        guard let expandedSpotlight, let target = step.target else {
-            return CGPoint(x: containerSize.width / 2, y: containerSize.height / 2)
-        }
-        return FeatureTourCalloutLayout.position(
+        FeatureTourCalloutLayout.position(
             spotlight: expandedSpotlight,
             containerSize: containerSize,
             calloutSize: calloutSize,
-            target: target
+            target: step.target
         )
     }
 }
@@ -366,7 +358,7 @@ struct FeatureTourInvitationView: View {
                     .accessibilityLabel("Skip walkthrough")
                 }
 
-                Text("See \(tour.steps.count) additions in the places where you’ll actually use them. You can replay this later from What’s New in Muesli.")
+                Text("See \(tour.steps.count) additions in the places where you’ll actually use them. You can replay this later from What’s New in \(AppIdentity.displayName).")
                     .font(MuesliTheme.body())
                     .foregroundStyle(MuesliTheme.textSecondary)
                     .lineSpacing(2)

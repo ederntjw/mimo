@@ -176,6 +176,7 @@ struct SettingsView: View {
 
     let appState: AppState
     let controller: MuesliController
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     private enum OpenAIConnectionTestState: Equatable {
         case idle
@@ -548,7 +549,7 @@ struct SettingsView: View {
                     controller.requestDictionaryCorrectionAccessibilityEnable()
                 }
             } message: {
-                Text("Dictionary suggestions briefly read focused app text via Accessibility after dictation. Grant access, then relaunch Muesli to turn suggestions on.")
+                Text("Dictionary suggestions briefly read focused app text via Accessibility after dictation. Grant access, then relaunch \(AppIdentity.displayName) to turn suggestions on.")
             }
             .alert("Reconnect iCloud sync?", isPresented: $isShowingICloudSyncReconnectConfirmation) {
                 Button("Cancel", role: .cancel) {}
@@ -592,10 +593,7 @@ struct SettingsView: View {
 
     private func scrollToFeatureTourTarget(_ target: FeatureTourTarget?, using proxy: ScrollViewProxy) {
         guard let target,
-              target == .liveCaptionsSetting
-                || target == .cloudCleanupSetting
-                || target == .dictationProviderSetting
-                || target == .quillSettings else { return }
+              target == .liveCaptionsSetting || target == .cloudCleanupSetting else { return }
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.2)) {
                 proxy.scrollTo(target.rawValue, anchor: .center)
@@ -1023,8 +1021,6 @@ struct SettingsView: View {
                     }
                 }
             }
-            .id(FeatureTourTarget.dictationProviderSetting.rawValue)
-            .featureTourTarget(.dictationProviderSetting)
             Divider().background(MuesliTheme.surfaceBorder)
             if appState.dictationProvider == .openAI {
                 openAIDictationSettingsRows
@@ -1195,7 +1191,7 @@ struct SettingsView: View {
         settingsSection("Transcription") {
             settingsRow(
                 "Microphone",
-                description: "Only affects Muesli. Changes apply immediately.",
+                description: "Only affects \(AppIdentity.displayName). Changes apply immediately.",
                 controlWidth: meetingControlWidth
             ) {
                 let options = meetingMicrophoneOptions
@@ -1307,6 +1303,23 @@ struct SettingsView: View {
                     controller.setPostProcessorEnabled(newValue)
                 }
             }
+            Divider().background(MuesliTheme.surfaceBorder)
+            settingsRow(
+                "Cleanup source",
+                description: cleanupBackendDescription,
+                controlWidth: meetingControlWidth
+            ) {
+                settingsMenu(
+                    selection: selectedCleanupBackendLabel,
+                    options: cleanupBackendOptions.map(\.label)
+                ) { label in
+                    if let option = cleanupBackendOptions.first(where: { $0.label == label }) {
+                        controller.selectPostProcessorBackend(option)
+                    }
+                }
+            }
+            .id(FeatureTourTarget.cloudCleanupSetting.rawValue)
+            .featureTourTarget(.cloudCleanupSetting)
             if appState.config.enablePostProcessor {
                 Divider().background(MuesliTheme.surfaceBorder)
                 if cleanupModelUsesFixedPrompt {
@@ -1314,57 +1327,40 @@ struct SettingsView: View {
                 } else {
                     cleanupPromptSettings
                 }
+            }
+            if appState.selectedPostProcessorBackend.isOnDevice {
                 Divider().background(MuesliTheme.surfaceBorder)
-                settingsRow(
-                    "Cleanup source",
-                    description: cleanupBackendDescription,
-                    controlWidth: meetingControlWidth
-                ) {
-                    settingsMenu(
-                        selection: selectedCleanupBackendLabel,
-                        options: cleanupBackendOptions.map(\.label)
-                    ) { label in
-                        if let option = cleanupBackendOptions.first(where: { $0.label == label }) {
-                            controller.selectPostProcessorBackend(option)
+                settingsRow("Cleanup model", controlWidth: meetingControlWidth) {
+                    if onDeviceCleanupModels.isEmpty {
+                        compactActionButton("View cleanup models", systemImage: "arrow.right") {
+                            controller.showModels(category: .postProcessing)
                         }
-                    }
-                }
-                .id(FeatureTourTarget.cloudCleanupSetting.rawValue)
-                .featureTourTarget(.cloudCleanupSetting)
-                if appState.selectedPostProcessorBackend.isOnDevice {
-                    Divider().background(MuesliTheme.surfaceBorder)
-                    settingsRow("Cleanup model", controlWidth: meetingControlWidth) {
-                        if onDeviceCleanupModels.isEmpty {
-                            compactActionButton("View cleanup models", systemImage: "arrow.right") {
-                                controller.showModels(category: .postProcessing)
-                            }
-                            .frame(width: meetingControlWidth, alignment: .trailing)
-                        } else {
-                            FixedWidthPopUp(
-                                selection: selectedOnDeviceCleanupModelLabel,
-                                options: onDeviceCleanupModels.map(\.label),
-                                onSelectIndex: { index in
-                                    guard onDeviceCleanupModels.indices.contains(index) else { return }
-                                    switch onDeviceCleanupModels[index] {
-                                    case let .gguf(option):
-                                        controller.selectPostProcessor(option)
-                                    case let .gemma4(model):
-                                        controller.selectGemma4PostProcessor(model)
-                                    }
+                        .frame(width: meetingControlWidth, alignment: .trailing)
+                    } else {
+                        FixedWidthPopUp(
+                            selection: selectedOnDeviceCleanupModelLabel,
+                            options: onDeviceCleanupModels.map(\.label),
+                            onSelectIndex: { index in
+                                guard onDeviceCleanupModels.indices.contains(index) else { return }
+                                switch onDeviceCleanupModels[index] {
+                                case let .gguf(option):
+                                    controller.selectPostProcessor(option)
+                                case let .gemma4(model):
+                                    controller.selectGemma4PostProcessor(model)
                                 }
-                            )
-                            .frame(height: 24)
-                        }
+                            }
+                        )
+                        .frame(height: 24)
                     }
-                    if gemmaCleanupIsUnavailable {
-                        Text("Gemma 4 is unavailable for cleanup while a Gemma 4 model is selected for dictation.")
-                            .font(MuesliTheme.body())
-                            .foregroundStyle(MuesliTheme.textTertiary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                } else {
-                    hostedCleanupSettings(for: appState.selectedPostProcessorBackend)
                 }
+                if gemmaCleanupIsUnavailable {
+                    Text("Gemma 4 is unavailable for cleanup while a Gemma 4 model is selected for dictation.")
+                        .font(MuesliTheme.body())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                hostedCleanupSettings(for: appState.selectedPostProcessorBackend)
             }
         }
     }
@@ -1435,8 +1431,6 @@ struct SettingsView: View {
                 }
             }
         }
-        .id(FeatureTourTarget.quillSettings.rawValue)
-        .featureTourTarget(.quillSettings)
     }
 
     private func selectQuilLocalModel(_ model: OnDeviceCleanupModel?) {
@@ -2183,6 +2177,14 @@ struct SettingsView: View {
             }
 
             settingsSection("Appearance") {
+                settingsRow(
+                    "Theme",
+                    description: MuesliVisualTheme.resolved(appState.config.visualTheme).detail,
+                    controlWidth: 410
+                ) {
+                    visualThemePicker
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
                 settingsRow("Dark mode") {
                     settingsSwitch(isOn: appState.config.darkMode) { newValue in
                         controller.updateConfig { $0.darkMode = newValue }
@@ -2237,6 +2239,72 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private var visualThemePicker: some View {
+        HStack(spacing: MuesliTheme.spacing8) {
+            ForEach(MuesliVisualTheme.allCases) { theme in
+                visualThemeChoice(theme)
+            }
+        }
+    }
+
+    private func visualThemeChoice(_ theme: MuesliVisualTheme) -> some View {
+        let selectedTheme = MuesliVisualTheme.resolved(appState.config.visualTheme)
+        let isSelected = selectedTheme == theme
+
+        return Button {
+            if accessibilityReduceMotion {
+                controller.selectVisualTheme(theme)
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    controller.selectVisualTheme(theme)
+                }
+            }
+        } label: {
+            HStack(alignment: .top, spacing: MuesliTheme.spacing8) {
+                ZStack {
+                    Circle()
+                        .fill(theme.previewAccent.opacity(0.16))
+                    Image(systemName: theme.icon)
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundStyle(theme.previewAccent)
+                }
+                .frame(width: 30, height: 30)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(theme.label)
+                        .font(MuesliTheme.captionMedium())
+                        .foregroundStyle(theme.previewTextPrimary)
+                    Text(theme.detail)
+                        .font(.system(size: 10, weight: .regular, design: theme == .strawberryMilk ? .rounded : .default))
+                        .foregroundStyle(theme.previewTextSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 2)
+
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(isSelected ? theme.previewAccent : theme.previewTextSecondary.opacity(0.65))
+            }
+            .padding(MuesliTheme.spacing8)
+            .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+            .background(theme.previewBackground.opacity(isSelected ? 0.96 : 0.58))
+            .overlay {
+                RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall, style: .continuous)
+                    .strokeBorder(
+                        isSelected ? theme.previewAccent : MuesliTheme.surfaceBorder,
+                        lineWidth: isSelected ? 2 : 1
+                    )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("appearance.theme.\(theme.rawValue)")
+        .accessibilityLabel(theme.label)
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityIdentifier("appearance.theme.\(theme.rawValue)")
     }
 
     private var glassTintPicker: some View {
@@ -2361,7 +2429,7 @@ struct SettingsView: View {
                 if let chatGPTSignInError {
                     Text(chatGPTSignInError)
                         .font(.system(size: 10))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(MuesliTheme.destructive)
                         .lineLimit(2)
                 }
             }
@@ -2423,7 +2491,7 @@ struct SettingsView: View {
                         }
                         .buttonStyle(.plain)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .help("Remove Muesli's local copy of this OpenRouter key")
+                        .help("Remove \(AppIdentity.displayName)'s local copy of this OpenRouter key")
                     } else {
                         Text("Managed externally")
                             .font(.system(size: 10))
@@ -2443,7 +2511,7 @@ struct SettingsView: View {
                 if let openRouterSignInError {
                     Text(openRouterSignInError)
                         .font(.system(size: 10))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(MuesliTheme.destructive)
                         .lineLimit(2)
                 }
             }
@@ -2525,7 +2593,7 @@ struct SettingsView: View {
                 if let openRouterSignInError {
                     Text(openRouterSignInError)
                         .font(.system(size: 10))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(MuesliTheme.destructive)
                         .lineLimit(2)
                 }
             }
@@ -2614,7 +2682,7 @@ struct SettingsView: View {
                 if let googleCalSignInError {
                     Text(googleCalSignInError)
                         .font(.system(size: 10))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(MuesliTheme.destructive)
                         .lineLimit(2)
                 }
             }
@@ -3316,7 +3384,7 @@ struct SettingsView: View {
             groups.append(CalendarSourceGroup(
                 id: "google_oauth",
                 title: "Google Calendar",
-                subtitle: "Connected directly to Muesli",
+                subtitle: "Connected directly to \(AppIdentity.displayName)",
                 iconName: "calendar.badge.plus",
                 items: items
             ))
@@ -3328,7 +3396,7 @@ struct SettingsView: View {
     private var calendarSourcesControl: some View {
         let sourceGroups = calendarSourceGroups
         return VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
-            Text("Calendar sources are listed first, with their calendars underneath. Disabled calendars are hidden from Muesli — no notifications, no Coming Up, no meeting detection.")
+            Text("Calendar sources are listed first, with their calendars underneath. Disabled calendars are hidden from \(AppIdentity.displayName) — no notifications, no Coming Up, no meeting detection.")
                 .font(MuesliTheme.caption())
                 .foregroundStyle(MuesliTheme.textTertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -3345,7 +3413,7 @@ struct SettingsView: View {
             }
 
             if appState.isGoogleCalendarAuthenticated && !appState.availableEventKitCalendars.isEmpty {
-                Text("Google calendars may appear once from macOS Calendar and once from Muesli's Google connection. Turn off both copies to hide that calendar completely.")
+                Text("Google calendars may appear once from macOS Calendar and once from \(AppIdentity.displayName)'s Google connection. Turn off both copies to hide that calendar completely.")
                     .font(MuesliTheme.caption())
                     .foregroundStyle(MuesliTheme.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)

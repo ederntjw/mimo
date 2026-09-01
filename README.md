@@ -2,7 +2,7 @@
   <img src="assets/muesli-readme-og.jpg" alt="Muesli - Speech that is free, Speech that is yours" width="900" />
 </p>
 
-<h1 align="center">Muesli</h1>
+<h1 align="center">Mimo</h1>
 
 <p align="center">
 <a href="https://trendshift.io/repositories/25442?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-25442" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/25442" alt="Muesli-HQ%2Fmuesli | Trendshift" width="250" height="55"/></a>
@@ -22,9 +22,11 @@
 
 ---
 
-## What is Muesli?
+> **Mimo desktop (2026-09-02):** This app uses Muesli as its MIT-licensed native macOS foundation. Mimo adds a live meeting-assistant mode—a rolling in-meeting brief plus transcript-grounded Q&A while recording continues—and the opt-in Strawberry Milk visual theme. See the [Mac-first product plan](docs/plans/plan-2026-09-01-live-meeting-assistant.md).
 
-Muesli is a **lightweight native macOS app** that combines **WisprFlow-style dictation** and **Granola-style meeting transcription** in one tool. Dictation and meeting transcription run locally on Apple Silicon by default. Audio leaves your device only when you explicitly select an optional hosted dictation provider such as OpenAI or OpenRouter; cloud-backed cleanup and meeting-summary providers can also receive the text you choose to send them.
+## What is Mimo?
+
+Mimo is a **lightweight native macOS app** that combines **WisprFlow-style dictation** and **Granola-style meeting transcription** in one tool. Dictation and meeting transcription run locally on Apple Silicon by default. Audio leaves your device only when you explicitly select an optional hosted dictation provider such as OpenAI or OpenRouter; cloud-backed cleanup and meeting-summary providers can also receive the text you choose to send them.
 
 <p align="center">
   <img src="assets/muesli-github-ss.png" alt="Muesli interface showing dictations and meeting history" width="900" />
@@ -53,6 +55,8 @@ Live transcription is off by default. Download Parakeet Realtime EOU or Nemotron
 - **Apple Shortcuts & Siri** — Six preconfigured actions out of the box: Start/Stop Dictation (latched hands-free mode, same as double-tapping the hotkey), Start/Stop Meeting Recording, Get Last Dictation, and Get Last Meeting Notes. Trigger them from Spotlight, Siri ("Start a meeting recording in Muesli"), keyboard shortcuts, or Shortcuts automations — e.g. auto-record when a calendar event starts, or pipe your last dictation into Notes, Messages, or Files.
 - **Meeting recording** — Captures mic + system audio (including Bluetooth/AirPods) with a CoreAudio process tap by default and ScreenCaptureKit fallback. System audio from Zoom, Teams, and other call clients stays on the Others side of the transcript.
 - **Live meeting transcript** — Choose Nemotron 3.5 for one multilingual live-and-final transcript, or Parakeet Realtime EOU for an English live preview paired with a separate final meeting model.
+- **Live meeting brief (fork feature)** — Continuously refreshes a non-final summary of important points, decisions, actions, and open questions without stopping capture.
+- **Ask while recording (fork feature)** — Ask questions about committed speech while the meeting continues; answers use a read-only transcript snapshot and request timestamp evidence for important claims.
 - **VAD-driven chunk rotation** — Silero VAD detects natural speech boundaries in real-time, splitting mic audio at pauses instead of fixed intervals. No mid-sentence cuts.
 - **Speaker diarization** — Identifies individual speakers in system audio (Speaker 1, Speaker 2, etc.) using FluidAudio's pyannote-based CoreML diarization model.
 - **Camera-based meeting detection** — Detects when your webcam + mic activate in a recognized meeting app (Zoom, Chrome, Teams, FaceTime, Slack, WhatsApp). Camera alone (e.g. Photo Booth) won't trigger false positives.
@@ -84,7 +88,7 @@ Live transcription is off by default. Download Parakeet Realtime EOU or Nemotron
 
 ### Download (recommended)
 
-Download the latest `.dmg` from [Releases](https://github.com/Muesli-HQ/muesli/releases), open it, and drag Muesli to Applications — or double-click to install automatically.
+Download the latest `.dmg` from [Releases](https://github.com/ederntjw/mimo/releases), open it, and drag Mimo to Applications.
 
 ### Homebrew
 
@@ -101,8 +105,8 @@ Current Homebrew also resolves `brew install muesli` to the official cask; the
 
 ```bash
 # Clone
-git clone https://github.com/Muesli-HQ/muesli.git
-cd muesli
+git clone https://github.com/ederntjw/mimo.git
+cd mimo
 
 # Build and install to /Applications
 ./scripts/build_native_app.sh
@@ -429,8 +433,8 @@ Muesli needs these macOS permissions (guided during onboarding):
 Contributions welcome! To get started:
 
 ```bash
-git clone https://github.com/Muesli-HQ/muesli.git
-cd muesli
+git clone https://github.com/ederntjw/mimo.git
+cd mimo
 swift build --package-path native/MuesliNative -c release
 swift test --package-path native/MuesliNative
 ./scripts/test_packaged_cli.sh
@@ -503,10 +507,10 @@ Muesli has been possible because of the generosity of companies such as:
 
 ## Star History
 
-<a href="https://www.star-history.com/?repos=Muesli-HQ%2Fmuesli&type=date&legend=top-left">
+<a href="https://www.star-history.com/?repos=ederntjw%2Fmimo&type=date&legend=top-left">
    <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=Muesli-HQ/muesli&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=Muesli-HQ/muesli&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=Muesli-HQ/muesli&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=ederntjw/mimo&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=ederntjw/mimo&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=ederntjw/mimo&type=date&legend=top-left" />
    </picture>
 </a>

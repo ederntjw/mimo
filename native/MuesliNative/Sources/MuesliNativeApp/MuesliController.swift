@@ -443,6 +443,11 @@ public final class MuesliController: NSObject {
     /// session-identity gate. Replaced on the next meeting start.
     private var micEpisodeTelemetryGate = RecentMeetingIdentityGate()
     private var liveMeetingTranscriptGeneration: UUID?
+    private var liveMeetingSummaryTask: Task<Void, Never>?
+    private var liveMeetingSummaryRequestID: UUID?
+    private var liveMeetingAssistantTask: Task<Void, Never>?
+    private var liveMeetingAssistantRequestID: UUID?
+    private var liveMeetingSummaryLastTranscriptCount = 0
     private var activeMeetingAudioWarning: ActiveMeetingAudioWarning?
     private var liveMeetingTitleCache: [Int64: String] = [:]
     private var liveManualNotesCache: [Int64: String] = [:]
@@ -596,9 +601,10 @@ public final class MuesliController: NSObject {
         self.dictationAudioRoutingController.selectedInputDeviceUID = loadedConfig.dictationInputDeviceUID
         self.dictationAudioRoutingController.selectedMeetingInputDeviceUID = loadedConfig.meetingInputDeviceUID
         self.config = loadedConfig
-        if loadedConfig.recordingColorHex != "1e1e2e" {
-            MuesliTheme.accentOverrideHex = loadedConfig.recordingColorHex
-        }
+        MuesliTheme.apply(visualTheme: loadedConfig.visualTheme)
+        MuesliTheme.accentOverrideHex = loadedConfig.recordingColorHex == "1e1e2e"
+            ? nil
+            : loadedConfig.recordingColorHex
         self.selectedBackend = loadedBackend
         self.selectedDictationProvider = loadedConfig.resolvedDictationProvider
         let configuredMeetingBackend = BackendOption.resolve(
@@ -720,18 +726,19 @@ public final class MuesliController: NSObject {
             DispatchQueue.main.async { self?.stopMeetingRecording() }
         }
 
+        let startupPermissionsReady = hasRequiredStartupPermissions(for: config.resolvedOnboardingUseCase)
         let canRunMainApp = config.hasCompletedOnboarding
-            && hasRequiredStartupPermissions(for: config.resolvedOnboardingUseCase)
-        meetingFeatureMonitorsAllowed = canRunMainApp
+            && (startupPermissionsReady || allowsVisualUITestPermissionBypass)
+        meetingFeatureMonitorsAllowed = config.hasCompletedOnboarding && startupPermissionsReady
 
         // Defer permission-triggering monitors until after onboarding
-        if canRunMainApp && config.resolvedOnboardingUseCase.includesPushToTalk {
+        if startupPermissionsReady && config.resolvedOnboardingUseCase.includesPushToTalk {
             hotkeyMonitor.configure(config.dictationHotkey)
             hotkeyMonitor.start()
             startComputerUseHotkeyMonitorIfNeeded()
             startQuilHotkeyMonitorIfNeeded()
         }
-        if canRunMainApp {
+        if startupPermissionsReady {
             startMeetingRecordingHotkeyMonitorIfNeeded()
         }
         syncDictationRecorderWarmup(intent: .idlePrewarm(.startup))
@@ -1081,7 +1088,20 @@ public final class MuesliController: NSObject {
     }
 
     private func latestFeatureTour() -> FeatureTour {
-        FeatureTourCatalog.latest
+        let targetApplications = (try? dictationStore.dictationTargetApplications()) ?? []
+        let latestMeetingID = (try? dictationStore.recentMeetings(limit: 1))?.first?.id
+        return FeatureTourCatalog.latest(
+            includeApplicationFilter: !targetApplications.isEmpty,
+            includeAppleSpeech: Self.includesAppleSpeechInFeatureTour,
+            includeMeetingPeople: latestMeetingID != nil
+        )
+    }
+
+    private static var includesAppleSpeechInFeatureTour: Bool {
+        if #available(macOS 26.0, *) {
+            return AppleSpeechAnalyzerTranscriber.isSupportedOnCurrentSystem
+        }
+        return false
     }
 
     @discardableResult
@@ -1103,6 +1123,7 @@ public final class MuesliController: NSObject {
             TelemetryDeck.signal("feature_walkthrough.invitation_shown", parameters: [
                 "version": tour.version,
                 "step_count": "\(tour.steps.count)",
+                "includes_apple_speech": "\(tour.steps.contains { $0.target == .appleSpeechCard })",
             ])
         })
         // The normal startup preload task continues while this invitation and
@@ -1205,22 +1226,22 @@ public final class MuesliController: NSObject {
         if appState.isSearchActive {
             clearSearch()
         }
-        guard let target = step.target else { return }
-        switch target.navigationRoute {
-        case let .settings(pane):
-            appState.selectedSettingsPane = pane
-            appState.selectedTab = .settings
-        case let .tab(tab):
-            appState.selectedTab = tab
-        case let .models(category):
-            showModels(category: category)
+        switch step.target {
+        case .timelineSidebar, .timelineFilters:
+            appState.selectedTab = .timeline
         case .timelineApplications:
             guard (try? dictationStore.dictationTargetApplications().isEmpty) == false else {
                 completeFeatureTour()
                 return
             }
             appState.selectedTab = .timeline
-        case .meetingsBrowser:
+        case .appleSpeechCard, .modelLibrary:
+            showModels(category: .dictation)
+        case .insightsEntry:
+            appState.selectedTab = .timeline
+        case .dictionarySuggestions:
+            appState.selectedTab = .dictionary
+        case .meetingsSidebar:
             appState.selectedTab = .meetings
             appState.meetingsNavigationState = .browser
             appState.selectedMeetingID = nil
@@ -1231,6 +1252,16 @@ public final class MuesliController: NSObject {
                 return
             }
             showMeetingDocument(id: meetingID)
+        case .liveCaptionsSetting:
+            appState.selectedSettingsPane = .meetings
+            appState.selectedTab = .settings
+        case .cloudCleanupSetting:
+            appState.selectedSettingsPane = .dictation
+            appState.selectedTab = .settings
+        case .streamingModels, .experimentalModels:
+            if let category = step.target.modelsCategory {
+                showModels(category: category)
+            }
         }
     }
 
@@ -1528,6 +1559,7 @@ public final class MuesliController: NSObject {
             || config.quilHotkeyTriggerThresholdMS != previousQuilHotkeyTriggerThresholdMS
             || config.computerUseHotkeyTriggerThresholdMS != previousComputerUseHotkeyTriggerThresholdMS
             || config.meetingRecordingHotkeyTriggerThresholdMS != previousMeetingRecordingHotkeyTriggerThresholdMS
+        MuesliTheme.apply(visualTheme: config.visualTheme)
         MuesliTheme.accentOverrideHex = config.recordingColorHex == "1e1e2e" ? nil : config.recordingColorHex
         selectedBackend = BackendOption.all.first(where: {
             $0.backend == config.sttBackend && $0.model == config.sttModel
@@ -1600,6 +1632,13 @@ public final class MuesliController: NSObject {
         historyWindowController?.applyThemeAppearance()
     }
 
+    func selectVisualTheme(_ theme: MuesliVisualTheme) {
+        updateConfig { config in
+            config.visualTheme = theme.rawValue
+            config.recordingColorHex = theme.accentHex(afterSelecting: config.recordingColorHex)
+        }
+    }
+
     private func applyConfigRuntimeSideEffects(
         wasICloudSyncEnabled: Bool,
         hotkeyTriggerThresholdChanged: Bool,
@@ -1665,6 +1704,7 @@ public final class MuesliController: NSObject {
     private func clearLiveMeetingTranscript(ownerID: Int64? = nil, generation: UUID? = nil) {
         if let ownerID, appState.liveMeetingTranscriptOwnerID != ownerID { return }
         if let generation, liveMeetingTranscriptGeneration != generation { return }
+        resetLiveMeetingAssistantState()
         appState.liveMeetingTranscript = ""
         appState.liveMeetingPartialYou = ""
         appState.liveMeetingPartialOthers = ""
@@ -1676,6 +1716,223 @@ public final class MuesliController: NSObject {
     private func isCurrentLiveMeetingTranscriptSession(ownerID: Int64, generation: UUID) -> Bool {
         appState.liveMeetingTranscriptOwnerID == ownerID
             && liveMeetingTranscriptGeneration == generation
+    }
+
+    private func resetLiveMeetingAssistantState() {
+        liveMeetingSummaryTask?.cancel()
+        liveMeetingSummaryTask = nil
+        liveMeetingSummaryRequestID = nil
+        liveMeetingAssistantTask?.cancel()
+        liveMeetingAssistantTask = nil
+        liveMeetingAssistantRequestID = nil
+        liveMeetingSummaryLastTranscriptCount = 0
+        appState.liveMeetingSummary = ""
+        appState.liveMeetingSummaryUpdatedAt = nil
+        appState.isLiveMeetingSummaryRefreshing = false
+        appState.liveMeetingAssistantMessages = []
+        appState.isLiveMeetingAssistantAnswering = false
+        appState.liveMeetingAssistantError = nil
+    }
+
+    private func committedLiveMeetingTranscript(meetingID: Int64) -> String {
+        let priorTranscript = pendingResumePriorTranscript[meetingID]
+            ?? meeting(id: meetingID)?.rawTranscript
+            ?? ""
+        return MeetingResumePolicy.combinedResumeTranscript(
+            prior: priorTranscript,
+            new: appState.liveMeetingTranscript
+        )
+    }
+
+    private func scheduleLiveMeetingSummary(
+        ownerID: Int64,
+        generation: UUID,
+        meetingTitle: String
+    ) {
+        guard liveMeetingSummaryTask == nil,
+              isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) else {
+            return
+        }
+        let delay = liveMeetingSummaryLastTranscriptCount == 0
+            ? LiveMeetingSummaryPolicy.initialDelay
+            : LiveMeetingSummaryPolicy.refreshDelay
+        let requestID = UUID()
+        liveMeetingSummaryRequestID = requestID
+        liveMeetingSummaryTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard let self,
+                  self.liveMeetingSummaryRequestID == requestID,
+                  self.isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) else {
+                return
+            }
+            self.liveMeetingSummaryTask = nil
+            self.liveMeetingSummaryRequestID = nil
+            self.generateLiveMeetingSummary(
+                ownerID: ownerID,
+                generation: generation,
+                meetingTitle: meetingTitle,
+                force: false
+            )
+        }
+    }
+
+    func refreshLiveMeetingSummary(meetingID: Int64) {
+        guard appState.liveMeetingTranscriptOwnerID == meetingID,
+              let generation = liveMeetingTranscriptGeneration else {
+            return
+        }
+        liveMeetingSummaryTask?.cancel()
+        liveMeetingSummaryTask = nil
+        liveMeetingSummaryRequestID = nil
+        generateLiveMeetingSummary(
+            ownerID: meetingID,
+            generation: generation,
+            meetingTitle: liveMeetingTitleCache[meetingID] ?? meeting(id: meetingID)?.title ?? "Meeting",
+            force: true
+        )
+    }
+
+    private func generateLiveMeetingSummary(
+        ownerID: Int64,
+        generation: UUID,
+        meetingTitle: String,
+        force: Bool
+    ) {
+        let transcript = committedLiveMeetingTranscript(meetingID: ownerID)
+        let transcriptCount = transcript.count
+        guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            appState.liveMeetingAssistantError = "Waiting for committed speech before creating a live brief."
+            return
+        }
+        guard force || LiveMeetingSummaryPolicy.shouldGenerate(
+            transcriptCharacterCount: transcriptCount,
+            lastSummarizedCharacterCount: liveMeetingSummaryLastTranscriptCount,
+            isGenerating: appState.isLiveMeetingSummaryRefreshing
+        ) else {
+            return
+        }
+
+        let previousDigest = appState.liveMeetingSummary
+        let requestID = UUID()
+        liveMeetingSummaryRequestID = requestID
+        appState.isLiveMeetingSummaryRefreshing = true
+        appState.liveMeetingAssistantError = nil
+        liveMeetingSummaryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var shouldScheduleNextRefresh = false
+            do {
+                let digest = try await MeetingSummaryClient.summarizeLiveMeeting(
+                    transcript: transcript,
+                    meetingTitle: meetingTitle,
+                    previousDigest: previousDigest.isEmpty ? nil : previousDigest,
+                    config: self.config
+                )
+                guard self.liveMeetingSummaryRequestID == requestID,
+                      self.isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) else {
+                    return
+                }
+                self.appState.liveMeetingSummary = digest
+                self.appState.liveMeetingSummaryUpdatedAt = Date()
+                self.liveMeetingSummaryLastTranscriptCount = transcriptCount
+                shouldScheduleNextRefresh = true
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.liveMeetingSummaryRequestID == requestID,
+                      self.isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) else {
+                    return
+                }
+                self.appState.liveMeetingAssistantError = "Live brief failed: \(error.localizedDescription)"
+            }
+
+            guard self.liveMeetingSummaryRequestID == requestID else { return }
+            self.liveMeetingSummaryTask = nil
+            self.liveMeetingSummaryRequestID = nil
+            self.appState.isLiveMeetingSummaryRefreshing = false
+            if shouldScheduleNextRefresh,
+               self.isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) {
+                self.scheduleLiveMeetingSummary(
+                    ownerID: ownerID,
+                    generation: generation,
+                    meetingTitle: meetingTitle
+                )
+            }
+        }
+    }
+
+    func askLiveMeetingAssistant(question: String, meetingID: Int64) {
+        let normalizedQuestion = String(
+            question
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .prefix(2_000)
+        )
+        guard !normalizedQuestion.isEmpty,
+              !appState.isLiveMeetingAssistantAnswering,
+              appState.liveMeetingTranscriptOwnerID == meetingID,
+              let generation = liveMeetingTranscriptGeneration else {
+            return
+        }
+
+        let transcript = committedLiveMeetingTranscript(meetingID: meetingID)
+        appState.liveMeetingAssistantMessages.append(
+            LiveMeetingAssistantMessage(role: .user, text: normalizedQuestion)
+        )
+        guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            appState.liveMeetingAssistantMessages.append(
+                LiveMeetingAssistantMessage(
+                    role: .assistant,
+                    text: "I do not have any committed transcript text yet. Keep recording and ask again after the first caption appears."
+                )
+            )
+            return
+        }
+
+        let requestID = UUID()
+        liveMeetingAssistantRequestID = requestID
+        appState.isLiveMeetingAssistantAnswering = true
+        appState.liveMeetingAssistantError = nil
+        let title = liveMeetingTitleCache[meetingID] ?? meeting(id: meetingID)?.title ?? "Meeting"
+        liveMeetingAssistantTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let answer = try await MeetingSummaryClient.answerLiveMeetingQuestion(
+                    normalizedQuestion,
+                    transcript: transcript,
+                    meetingTitle: title,
+                    config: self.config
+                )
+                guard self.liveMeetingAssistantRequestID == requestID,
+                      self.isCurrentLiveMeetingTranscriptSession(ownerID: meetingID, generation: generation) else {
+                    return
+                }
+                self.appState.liveMeetingAssistantMessages.append(
+                    LiveMeetingAssistantMessage(role: .assistant, text: answer)
+                )
+            } catch is CancellationError {
+                return
+            } catch {
+                guard self.liveMeetingAssistantRequestID == requestID,
+                      self.isCurrentLiveMeetingTranscriptSession(ownerID: meetingID, generation: generation) else {
+                    return
+                }
+                self.appState.liveMeetingAssistantError = "Question failed: \(error.localizedDescription)"
+                self.appState.liveMeetingAssistantMessages.append(
+                    LiveMeetingAssistantMessage(
+                        role: .assistant,
+                        text: "I could not answer that yet. The recording is still running; check the selected meeting-summary provider and try again."
+                    )
+                )
+            }
+
+            guard self.liveMeetingAssistantRequestID == requestID else { return }
+            self.liveMeetingAssistantTask = nil
+            self.liveMeetingAssistantRequestID = nil
+            self.appState.isLiveMeetingAssistantAnswering = false
+        }
     }
 
     private func refreshContributionMilestonePrompt(totalWords: Int, totalMeetings: Int) {
@@ -4864,6 +5121,17 @@ public final class MuesliController: NSObject {
         )
     }
 
+    /// Lets a DEBUG lane render the real dashboard for visual regression work
+    /// without granting microphone, Accessibility, or Input Monitoring access.
+    /// Release builds never compile in the bypass.
+    private var allowsVisualUITestPermissionBypass: Bool {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["MUESLI_UI_TEST_BYPASS_PERMISSIONS"] == "1"
+        #else
+        false
+        #endif
+    }
+
     func reclassifyVoiceNotesAsDictationIfReady(
         microphoneGranted: Bool,
         accessibilityGranted: Bool,
@@ -4893,7 +5161,8 @@ public final class MuesliController: NSObject {
     }
 
     private func ensureBasicDictationPermissionsBeforeDashboard() -> Bool {
-        guard hasRequiredStartupPermissions(for: config.resolvedOnboardingUseCase) else {
+        guard hasRequiredStartupPermissions(for: config.resolvedOnboardingUseCase)
+                || allowsVisualUITestPermissionBypass else {
             historyWindowController?.close()
             if let progress = OnboardingProgress.load() {
                 showOnboarding(resumeFrom: progress)
@@ -5998,7 +6267,7 @@ public final class MuesliController: NSObject {
             informativeText = "Quitting now will cancel the meeting recording before it has been saved."
         case .recording:
             messageText = "Meeting recording in progress"
-            informativeText = "Quitting now will stop the meeting recording and the current transcript may be lost. Stop the recording first if you want Muesli to save notes."
+            informativeText = "Quitting now will stop the meeting recording and the current transcript may be lost. Stop the recording first if you want \(AppIdentity.displayName) to save notes."
         case .processing:
             messageText = "Meeting transcription in progress"
             informativeText = "Quitting now will interrupt transcription and the meeting notes may not be saved."
@@ -6012,7 +6281,7 @@ public final class MuesliController: NSObject {
         alert.alertStyle = .warning
         alert.messageText = messageText
         alert.informativeText = informativeText
-        alert.addButton(withTitle: "Keep Muesli Running")
+        alert.addButton(withTitle: "Keep \(AppIdentity.displayName) Running")
         alert.addButton(withTitle: "Quit Anyway")
 
         isPresentingMeetingTerminationConfirmation = true
@@ -6779,6 +7048,11 @@ public final class MuesliController: NSObject {
                             partialYou: self.appState.liveMeetingPartialYou,
                             partialOthers: self.appState.liveMeetingPartialOthers
                         )
+                        self.scheduleLiveMeetingSummary(
+                            ownerID: meetingID,
+                            generation: transcriptGeneration,
+                            meetingTitle: title
+                        )
                     }
                 }
                 meetingSession.onPartialTranscript = { [weak self] speaker, tail in
@@ -6802,6 +7076,7 @@ public final class MuesliController: NSObject {
                         )
                     }
                 }
+                resetLiveMeetingAssistantState()
                 appState.liveMeetingTranscriptOwnerID = meetingID
                 liveMeetingTranscriptGeneration = transcriptGeneration
                 appState.liveMeetingTranscript = ""
@@ -10911,7 +11186,7 @@ public final class MuesliController: NSObject {
             return "The model could not finish downloading. Check your connection and retry."
         }
         if lowercasedMessage.contains("permission") || lowercasedMessage.contains("microphone") {
-            return "Muesli could not access the microphone. Check Microphone permission and try again."
+            return "\(AppIdentity.displayName) could not access the microphone. Check Microphone permission and try again."
         }
         return "Dictation could not start. Try again in a moment."
     }

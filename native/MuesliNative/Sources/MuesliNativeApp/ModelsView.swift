@@ -205,8 +205,6 @@ struct ModelsView: View {
                 selection: $selectedParakeetModel,
                 options: BackendOption.parakeetFamily
             )
-            .id(FeatureTourTarget.parakeetFamilyCard.rawValue)
-            .featureTourTarget(.parakeetFamilyCard)
 
             familyCard(
                 title: "Whisper",
@@ -259,9 +257,6 @@ struct ModelsView: View {
             appState.selectedModelsCategory = .dictation
         case .appleSpeechCard:
             target = .appleSpeechCard
-            appState.selectedModelsCategory = .dictation
-        case .parakeetFamilyCard:
-            target = .parakeetFamilyCard
             appState.selectedModelsCategory = .dictation
         case .streamingModels:
             target = .streamingModels

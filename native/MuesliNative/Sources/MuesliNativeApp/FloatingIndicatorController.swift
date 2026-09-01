@@ -139,18 +139,19 @@ private final class IdleShortcutPillView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         let pillRect = bounds.insetBy(dx: 0.5, dy: 0.5)
-        let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: 14, yRadius: 14)
-        NSColor.black.withAlphaComponent(0.97).setFill()
+        let radius = MuesliTheme.usesCuteStyling ? MuesliTheme.cornerSmall : 14
+        let pillPath = NSBezierPath(roundedRect: pillRect, xRadius: radius, yRadius: radius)
+        MuesliTheme.indicatorBaseNSColor.withAlphaComponent(0.97).setFill()
         pillPath.fill()
-        NSColor.white.withAlphaComponent(0.16).setStroke()
+        MuesliTheme.indicatorBorderNSColor.setStroke()
         pillPath.lineWidth = 1
         pillPath.stroke()
 
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 15, weight: .regular),
-            .foregroundColor: NSColor.white.withAlphaComponent(0.88),
+            .font: MuesliTheme.appKitFont(size: 15, weight: .regular),
+            .foregroundColor: MuesliTheme.textPrimaryNSColor,
             .paragraphStyle: paragraph
         ]
         let attributedTitle = NSAttributedString(string: title, attributes: attributes)
@@ -688,9 +689,9 @@ final class FloatingIndicatorController: NSObject {
             panel.animator().alphaValue = 1.0
             contentView.animator().frame = NSRect(origin: .zero, size: targetSize)
             contentView.layer?.cornerRadius = targetSize.height / 2
-            contentView.layer?.backgroundColor = NSColor.colorWith(hex: 0x1455D9, alpha: 0.88).cgColor
+            contentView.layer?.backgroundColor = MuesliTheme.accentNSColor.withAlphaComponent(0.88).cgColor
             contentView.layer?.borderWidth = 1.0
-            contentView.layer?.borderColor = NSColor.colorWith(hex: 0xFFFFFF, alpha: 0.34).cgColor
+            contentView.layer?.borderColor = MuesliTheme.indicatorBorderNSColor.cgColor
 
             iconLabel.isHidden = false
             iconLabel.animator().alphaValue = 1
@@ -768,9 +769,9 @@ final class FloatingIndicatorController: NSObject {
             panel.animator().alphaValue = 1.0
             contentView.animator().frame = NSRect(origin: .zero, size: warningSize)
             contentView.layer?.cornerRadius = warningSize.height / 2
-            contentView.layer?.backgroundColor = NSColor.colorWith(hex: 0xD99A11, alpha: 0.92).cgColor
+            contentView.layer?.backgroundColor = MuesliTheme.warningNSColor.withAlphaComponent(0.92).cgColor
             contentView.layer?.borderWidth = 1.0
-            contentView.layer?.borderColor = NSColor.colorWith(hex: 0xFFFFFF, alpha: 0.24).cgColor
+            contentView.layer?.borderColor = MuesliTheme.indicatorBorderNSColor.cgColor
 
             let hasIcon = !icon.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             iconLabel.isHidden = !hasIcon
@@ -841,7 +842,7 @@ final class FloatingIndicatorController: NSObject {
         iconLabel?.isHidden = true
         glassView?.isHidden = false
         tintLayer?.isHidden = false
-        tintLayer?.backgroundColor = NSColor.colorWith(hexString: "1e1e2e", alpha: 0.72).cgColor
+        tintLayer?.backgroundColor = MuesliTheme.indicatorBaseNSColor.withAlphaComponent(0.72).cgColor
         applyTintLayerGeometry(size: loadingSize, radius: loadingSize.height / 2)
 
         NSAnimationContext.runAnimationGroup { context in
@@ -855,7 +856,7 @@ final class FloatingIndicatorController: NSObject {
             contentView.layer?.cornerRadius = loadingSize.height / 2
             contentView.layer?.backgroundColor = NSColor.clear.cgColor
             contentView.layer?.borderWidth = 1.0
-            contentView.layer?.borderColor = NSColor.colorWith(hex: 0xFFFFFF, alpha: 0.16).cgColor
+            contentView.layer?.borderColor = MuesliTheme.indicatorBorderNSColor.cgColor
 
             loadingSpinner?.frame = NSRect(
                 x: startX, y: (loadingSize.height - spinnerSize) / 2,
@@ -1281,8 +1282,8 @@ final class FloatingIndicatorController: NSObject {
         CATransaction.setDisableActions(true)
         idleIconBackgroundLayer?.isHidden = false
         idleIconBackgroundLayer?.backgroundColor = isHovered
-            ? NSColor.colorWith(hex: 0x111111, alpha: 1).cgColor
-            : NSColor.colorWith(hex: 0x696969, alpha: 0.82).cgColor
+            ? MuesliTheme.hoverSurfaceNSColor.cgColor
+            : MuesliTheme.selectedSurfaceNSColor.withAlphaComponent(0.82).cgColor
         idleIconBackgroundLayer?.borderWidth = isHovered ? 1 : 0
         idleIconBackgroundLayer?.frame = isHovered ? pillFrame : restingHandle
         idleIconBackgroundLayer?.cornerRadius = isHovered ? pillFrame.height / 2 : 5
@@ -1329,23 +1330,23 @@ final class FloatingIndicatorController: NSObject {
         glassView?.layer?.masksToBounds = true
 
         let tintAlpha: CGFloat
-        let tintHex: String
+        let tintColor: NSColor
         switch state {
         case .idle:
             tintAlpha = isHovered ? 0.72 : 0.44
-            tintHex = "1e1e2e"
+            tintColor = MuesliTheme.indicatorBaseNSColor
         case .preparing:
             tintAlpha = 0.62
-            tintHex = "1e1e2e"
+            tintColor = MuesliTheme.indicatorBaseNSColor
         case .recording:
             tintAlpha = 0.85
-            tintHex = themeHex
+            tintColor = MuesliTheme.indicatorTintNSColor(recordingColorHex: themeHex)
         case .transcribing:
             tintAlpha = 0.62
-            tintHex = "1e1e2e"
+            tintColor = MuesliTheme.transcribingNSColor
         }
         tintLayer?.isHidden = false
-        tintLayer?.backgroundColor = NSColor.colorWith(hexString: tintHex, alpha: tintAlpha).cgColor
+        tintLayer?.backgroundColor = tintColor.withAlphaComponent(tintAlpha).cgColor
         applyTintLayerGeometry(size: frameSize, radius: radius)
 
         let iconSize = NSSize(width: 18, height: 18)
@@ -1689,7 +1690,7 @@ final class FloatingIndicatorController: NSObject {
         // Dark Catppuccin Mocha tint over the blur — gives the pill a defined
         // dark glass presence rather than showing everything underneath.
         let tint = CALayer()
-        tint.backgroundColor = NSColor.colorWith(hex: 0x1e1e2e, alpha: 0.44).cgColor
+        tint.backgroundColor = MuesliTheme.indicatorBaseNSColor.withAlphaComponent(0.44).cgColor
         tint.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
         tint.masksToBounds = false
         tint.cornerCurve = .continuous
@@ -1705,8 +1706,8 @@ final class FloatingIndicatorController: NSObject {
         idleShortcutPillView = shortcutPill
 
         let iconBackground = CALayer()
-        iconBackground.backgroundColor = NSColor.colorWith(hex: 0x111111, alpha: 1).cgColor
-        iconBackground.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        iconBackground.backgroundColor = MuesliTheme.hoverSurfaceNSColor.cgColor
+        iconBackground.borderColor = MuesliTheme.indicatorBorderNSColor.cgColor
         iconBackground.borderWidth = 1
         iconBackground.cornerCurve = .circular
         iconBackground.isHidden = true

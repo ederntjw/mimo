@@ -541,13 +541,13 @@ struct OnboardingView: View {
                 "Compiling CoreML files for the Neural Engine",
                 "Preparing the first dictation test",
                 "Future launches will skip most of this",
-                "We'll bring Muesli forward when ready",
+                "We'll bring \(AppIdentity.displayName) forward when ready",
             ]
         }
         return [
             "Preparing the first dictation test",
             "Future launches will skip most of this",
-            "We'll bring Muesli forward when ready",
+            "We'll bring \(AppIdentity.displayName) forward when ready",
         ]
     }
 
@@ -562,7 +562,7 @@ struct OnboardingView: View {
                 .frame(width: 80, height: 48)
 
             VStack(spacing: MuesliTheme.spacing8) {
-                Text("Welcome to Muesli")
+                Text("Welcome to \(AppIdentity.displayName)")
                     .font(MuesliTheme.title1())
                     .foregroundStyle(MuesliTheme.textPrimary)
 
@@ -585,7 +585,7 @@ struct OnboardingView: View {
             }
 
             VStack(spacing: MuesliTheme.spacing8) {
-                Text("What will you use Muesli for?")
+                Text("What will you use \(AppIdentity.displayName) for?")
                     .font(MuesliTheme.caption())
                     .foregroundStyle(MuesliTheme.textTertiary)
 
@@ -599,7 +599,7 @@ struct OnboardingView: View {
                     useCaseCard(
                         icon: "waveform",
                         title: "Voice Notes",
-                        subtitle: "Record in Muesli",
+                        subtitle: "Record in \(AppIdentity.displayName)",
                         selected: selectedUseCase == .voiceNotes
                     ) {
                         selectedUseCase = .voiceNotes
@@ -944,7 +944,7 @@ struct OnboardingView: View {
                     Button {
                         openApplicationsFolder()
                     } label: {
-                        Text("Need to add Muesli manually? Open Applications")
+                        Text("Need to add \(AppIdentity.displayName) manually? Open Applications")
                             .font(.system(size: 11))
                             .foregroundStyle(MuesliTheme.textTertiary)
                     }
@@ -1576,7 +1576,7 @@ struct OnboardingView: View {
                     }
                 }
             } else if summaryBackend == .openRouter {
-                Text("Connect OpenRouter in your browser. Muesli receives a dedicated API key after you approve access.")
+                Text("Connect OpenRouter in your browser. \(AppIdentity.displayName) receives a dedicated API key after you approve access.")
                     .font(MuesliTheme.caption())
                     .foregroundStyle(MuesliTheme.textSecondary)
                     .multilineTextAlignment(.center)
@@ -2001,7 +2001,7 @@ struct OnboardingView: View {
 
     private func modelPreparationFailureMessage(for backend: BackendOption) -> String {
         backend.isDownloaded
-            ? "Model setup failed. Restart Muesli or retry from Models."
+            ? "Model setup failed. Restart \(AppIdentity.displayName) or retry from Models."
             : "Download failed. Check your connection and retry."
     }
 

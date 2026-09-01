@@ -6,7 +6,7 @@ set -euo pipefail
 # Usage: ./scripts/create_dmg.sh [app_path] [output_dir]
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-APP_PATH="${1:-/Applications/Muesli.app}"
+APP_PATH="${1:-/Applications/Mimo.app}"
 OUTPUT_DIR="${2:-$ROOT/dist-release}"
 SIGN_IDENTITY="${MUESLI_SIGN_IDENTITY:-Developer ID Application: Pranav Hari Guruvayurappan (58W55QJ567)}"
 BACKGROUND_DIR="$ROOT/scripts/assets"
@@ -24,7 +24,7 @@ fi
 
 # Extract version from Info.plist
 VERSION=$(defaults read "$APP_PATH/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo "0.0.0")
-APP_NAME=$(defaults read "$APP_PATH/Contents/Info" CFBundleDisplayName 2>/dev/null || echo "Muesli")
+APP_NAME=$(defaults read "$APP_PATH/Contents/Info" CFBundleDisplayName 2>/dev/null || echo "Mimo")
 export MUESLI_DMG_APP_NAME="$APP_NAME"
 APP_BUNDLE_NAME="$(basename "$APP_PATH")"
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
@@ -170,8 +170,15 @@ MOUNT_POINT=""  # already detached — prevent double-detach in cleanup trap
 hdiutil convert "$TEMP_DMG" -format UDZO -o "$DMG_PATH"
 rm -f "$TEMP_DMG"
 
-# Sign the DMG
-codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$DMG_PATH"
+# Sign the DMG. A dash opts into ad-hoc signing for local/friends-and-family
+# previews when a Developer ID certificate is not installed on the build Mac.
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  codesign --force --sign - "$DMG_PATH"
+  SIGNING_DESCRIPTION="ad-hoc (not notarized)"
+else
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$DMG_PATH"
+  SIGNING_DESCRIPTION="$SIGN_IDENTITY"
+fi
 
 echo "DMG created: $DMG_PATH ($(du -sh "$DMG_PATH" | cut -f1))"
-echo "Signed with: $SIGN_IDENTITY"
+echo "Signed with: $SIGNING_DESCRIPTION"

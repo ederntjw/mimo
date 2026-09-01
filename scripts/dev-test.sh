@@ -105,12 +105,14 @@ done
 case "$LANE" in
   "")
     DEV_APP_NAME="MuesliDev"
+    DEV_DISPLAY_NAME="MimoDev"
     DEV_BUNDLE_ID="com.muesli.dev"
     ;;
   A|a|B|b|C|c)
     LANE_UPPER="$(printf '%s' "$LANE" | tr '[:lower:]' '[:upper:]')"
     LANE_LOWER="$(printf '%s' "$LANE" | tr '[:upper:]' '[:lower:]')"
     DEV_APP_NAME="MuesliDev${LANE_UPPER}"
+    DEV_DISPLAY_NAME="MimoDev${LANE_UPPER}"
     DEV_BUNDLE_ID="com.muesli.dev.${LANE_LOWER}"
     ;;
   *)
@@ -142,7 +144,7 @@ BUILD_ENV=(
   MUESLI_APP_NAME="$DEV_APP_NAME"
   MUESLI_BUNDLE_ID="$DEV_BUNDLE_ID"
   MUESLI_SUPPORT_DIR_NAME="$DEV_APP_NAME"
-  MUESLI_DISPLAY_NAME="$DEV_APP_NAME"
+  MUESLI_DISPLAY_NAME="$DEV_DISPLAY_NAME"
   MUESLI_SPARKLE_FEED_URL=""
   MUESLI_TELEMETRYDECK_APP_ID="$MUESLI_TELEMETRYDECK_DEV_APP_ID"
   MUESLI_TELEMETRY_CHANNEL="dev"

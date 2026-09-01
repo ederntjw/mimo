@@ -29,7 +29,7 @@ final class MeetingNotificationController {
     /// Fixed geometry for the split button, so swapping which action is armed never
     /// reflows the card. `splitButtonLabelFits` guards the assumption in tests.
     static let splitButtonWidth: CGFloat = 126
-    static let splitButtonFont = NSFont.systemFont(ofSize: 11, weight: .medium)
+    static var splitButtonFont: NSFont { MuesliTheme.appKitFont(size: 11, weight: .medium) }
 
     static func splitButtonLabelFits(_ label: String, horizontalPadding: CGFloat = 12) -> Bool {
         let labelWidth = (label as NSString).size(withAttributes: [.font: splitButtonFont]).width
@@ -103,8 +103,8 @@ final class MeetingNotificationController {
         let platformIcon = platform?.loadIcon()
         let iconSize: CGFloat = 26
         let textX: CGFloat = platformIcon == nil ? 14 : 14 + iconSize + 9
-        let titleFont = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let subtitleFont = NSFont.systemFont(ofSize: 11)
+        let titleFont = MuesliTheme.appKitFont(size: 13, weight: .semibold)
+        let subtitleFont = MuesliTheme.appKitFont(size: 11, weight: .regular)
 
         let minimumCardWidth: CGFloat = 344
         let cardWidth: CGFloat
@@ -159,17 +159,17 @@ final class MeetingNotificationController {
 
         let cardView = NSView(frame: NSRect(x: cardX, y: 0, width: cardWidth, height: cardHeight))
         cardView.wantsLayer = true
-        cardView.layer?.cornerRadius = 10
+        cardView.layer?.cornerRadius = MuesliTheme.cornerMedium
         cardView.layer?.masksToBounds = true
-        cardView.layer?.backgroundColor = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 0.97).cgColor
+        cardView.layer?.backgroundColor = MuesliTheme.panelBackgroundNSColor.cgColor
         cardView.layer?.borderWidth = 1
-        cardView.layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        cardView.layer?.borderColor = MuesliTheme.panelBorderNSColor.cgColor
         contentView.addSubview(cardView)
 
         // Countdown progress bar at bottom
         let progressBar = CALayer()
         progressBar.frame = CGRect(x: 0, y: 0, width: cardWidth, height: 3)
-        progressBar.backgroundColor = NSColor(red: 0.3, green: 0.6, blue: 1.0, alpha: 0.8).cgColor
+        progressBar.backgroundColor = MuesliTheme.panelProgressNSColor.cgColor
         cardView.layer?.addSublayer(progressBar)
         self.progressLayer = progressBar
 
@@ -177,7 +177,7 @@ final class MeetingNotificationController {
         progressBar.position = CGPoint(x: 0, y: 1.5)
 
         let dismissButton = NSButton(title: "×", target: self, action: #selector(handleDismiss))
-        dismissButton.font = .systemFont(ofSize: 15, weight: .medium)
+        dismissButton.font = MuesliTheme.appKitFont(size: 15, weight: .medium)
         dismissButton.frame = NSRect(
             x: cardX - closeButtonSize / 2,
             y: cardHeight + topGutter - closeButtonSize,
@@ -185,14 +185,14 @@ final class MeetingNotificationController {
             height: closeButtonSize
         )
         dismissButton.wantsLayer = true
-        dismissButton.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.70).cgColor
+        dismissButton.layer?.backgroundColor = MuesliTheme.panelDismissBackgroundNSColor.cgColor
         dismissButton.layer?.borderWidth = 1
-        dismissButton.layer?.borderColor = NSColor.white.withAlphaComponent(0.55).cgColor
+        dismissButton.layer?.borderColor = MuesliTheme.panelDismissBorderNSColor.cgColor
         dismissButton.layer?.cornerRadius = closeButtonSize / 2
         dismissButton.alignment = .center
         dismissButton.focusRingType = .none
         dismissButton.isBordered = false
-        dismissButton.contentTintColor = NSColor.white.withAlphaComponent(0.86)
+        dismissButton.contentTintColor = MuesliTheme.panelDismissTintNSColor
         dismissButton.toolTip = "Dismiss"
         contentView.addSubview(dismissButton)
         contentView.hoverFrames = [cardView.frame, dismissButton.frame]
@@ -208,14 +208,14 @@ final class MeetingNotificationController {
         // Title label
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = titleFont
-        titleLabel.textColor = .white
+        titleLabel.textColor = MuesliTheme.panelPrimaryTextNSColor
         titleLabel.frame = NSRect(x: textX, y: 32, width: 144, height: 18)
         cardView.addSubview(titleLabel)
 
         // Subtitle label
         let subtitleLabel = NSTextField(labelWithString: subtitle)
         subtitleLabel.font = subtitleFont
-        subtitleLabel.textColor = NSColor.white.withAlphaComponent(0.55)
+        subtitleLabel.textColor = MuesliTheme.panelSecondaryTextNSColor
         subtitleLabel.frame = NSRect(x: textX, y: 14, width: 144, height: 16)
         cardView.addSubview(subtitleLabel)
 
@@ -226,8 +226,8 @@ final class MeetingNotificationController {
             let totalWidth = buttonWidth + chevronWidth
             let buttonX = cardWidth - totalWidth - 12
             let textMaxX = buttonX - 8
-            let greenColor = NSColor(red: 0.20, green: 0.72, blue: 0.53, alpha: 1.0)
-            let greenDarker = NSColor(red: 0.15, green: 0.58, blue: 0.42, alpha: 1.0)
+            let greenColor = MuesliTheme.joinActionNSColor
+            let greenDarker = MuesliTheme.joinActionSecondaryNSColor
 
             // Clamp text labels so they don't overlap the button
             titleLabel.frame.size.width = textMaxX - textX
@@ -243,7 +243,7 @@ final class MeetingNotificationController {
             joinButton.frame = NSRect(x: buttonX, y: 15, width: buttonWidth, height: 30)
             joinButton.wantsLayer = true
             joinButton.layer?.backgroundColor = greenColor.cgColor
-            joinButton.layer?.cornerRadius = 6
+            joinButton.layer?.cornerRadius = MuesliTheme.cornerSmall
             joinButton.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMinXMaxYCorner]
             joinButton.isBordered = false
             joinButton.contentTintColor = .white
@@ -251,11 +251,11 @@ final class MeetingNotificationController {
 
             // Chevron dropdown button
             let chevronButton = NSButton(title: "▾", target: self, action: #selector(handleChevronClick(_:)))
-            chevronButton.font = .systemFont(ofSize: 9, weight: .medium)
+            chevronButton.font = MuesliTheme.appKitFont(size: 9, weight: .medium)
             chevronButton.frame = NSRect(x: buttonX + buttonWidth, y: 15, width: chevronWidth, height: 30)
             chevronButton.wantsLayer = true
             chevronButton.layer?.backgroundColor = greenDarker.cgColor
-            chevronButton.layer?.cornerRadius = 6
+            chevronButton.layer?.cornerRadius = MuesliTheme.cornerSmall
             chevronButton.layer?.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
             chevronButton.isBordered = false
             chevronButton.contentTintColor = NSColor.white.withAlphaComponent(0.8)
@@ -270,11 +270,11 @@ final class MeetingNotificationController {
             subtitleLabel.frame.size.width = textWidth
 
             let startButton = NSButton(title: actionLabel, target: self, action: #selector(handleStartRecording))
-            startButton.font = .systemFont(ofSize: 12, weight: .medium)
+            startButton.font = MuesliTheme.appKitFont(size: 12, weight: .medium)
             startButton.frame = NSRect(x: buttonX, y: 15, width: buttonWidth, height: 30)
             startButton.wantsLayer = true
-            startButton.layer?.backgroundColor = NSColor(red: 0.2, green: 0.5, blue: 1.0, alpha: 1.0).cgColor
-            startButton.layer?.cornerRadius = 6
+            startButton.layer?.backgroundColor = MuesliTheme.panelPrimaryActionNSColor.cgColor
+            startButton.layer?.cornerRadius = MuesliTheme.cornerSmall
             startButton.isBordered = false
             startButton.contentTintColor = .white
             cardView.addSubview(startButton)

@@ -225,6 +225,10 @@ struct DictationsView: View {
             .frame(height: 30)
             .background(isRecording ? MuesliTheme.recording : MuesliTheme.accent)
             .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+            .overlay(alignment: .topTrailing) {
+                MuesliPrimaryActionThemeAccents()
+                    .offset(x: 5, y: -5)
+            }
         }
         .buttonStyle(.plain)
         .disabled(appState.dictationState == .transcribing)

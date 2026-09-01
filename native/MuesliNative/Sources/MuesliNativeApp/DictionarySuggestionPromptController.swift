@@ -83,7 +83,7 @@ final class DictionarySuggestionPromptController: NSObject {
         contentView.addSubview(cardView)
 
         let dismissButton = NSButton(title: "×", target: self, action: #selector(handleDismiss))
-        dismissButton.font = .systemFont(ofSize: 15, weight: .medium)
+        dismissButton.font = MuesliTheme.appKitFont(size: 15, weight: .medium)
         dismissButton.frame = NSRect(
             x: cardX - closeButtonSize / 2,
             y: cardHeight + topGutter - closeButtonSize,
@@ -91,14 +91,14 @@ final class DictionarySuggestionPromptController: NSObject {
             height: closeButtonSize
         )
         dismissButton.wantsLayer = true
-        dismissButton.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.70).cgColor
+        dismissButton.layer?.backgroundColor = MuesliTheme.panelDismissBackgroundNSColor.cgColor
         dismissButton.layer?.borderWidth = 1
-        dismissButton.layer?.borderColor = NSColor.white.withAlphaComponent(0.55).cgColor
+        dismissButton.layer?.borderColor = MuesliTheme.panelDismissBorderNSColor.cgColor
         dismissButton.layer?.cornerRadius = closeButtonSize / 2
         dismissButton.alignment = .center
         dismissButton.focusRingType = .none
         dismissButton.isBordered = false
-        dismissButton.contentTintColor = NSColor.white.withAlphaComponent(0.86)
+        dismissButton.contentTintColor = MuesliTheme.panelDismissTintNSColor
         dismissButton.toolTip = "Dismiss"
         contentView.addSubview(dismissButton)
 
@@ -327,21 +327,21 @@ private final class DictionarySuggestionPromptView: NSView {
     private func setup() {
         let cardView = NSView(frame: cardFrame)
         cardView.wantsLayer = true
-        cardView.layer?.cornerRadius = 10
+        cardView.layer?.cornerRadius = MuesliTheme.cornerMedium
         cardView.layer?.masksToBounds = true
-        cardView.layer?.backgroundColor = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 0.97).cgColor
+        cardView.layer?.backgroundColor = MuesliTheme.panelBackgroundNSColor.cgColor
         cardView.layer?.borderWidth = 1
-        cardView.layer?.borderColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        cardView.layer?.borderColor = MuesliTheme.panelBorderNSColor.cgColor
         addSubview(cardView)
 
         let countdownTrack = CALayer()
         countdownTrack.frame = CGRect(x: 0, y: 0, width: cardFrame.width, height: 5)
-        countdownTrack.backgroundColor = NSColor.white.withAlphaComponent(0.10).cgColor
+        countdownTrack.backgroundColor = MuesliTheme.panelBorderNSColor.cgColor
         cardView.layer?.addSublayer(countdownTrack)
 
         let progressBar = CALayer()
         progressBar.frame = countdownTrack.bounds
-        progressBar.backgroundColor = NSColor(red: 0.24, green: 0.56, blue: 1.0, alpha: 1.0).cgColor
+        progressBar.backgroundColor = MuesliTheme.panelPrimaryActionNSColor.cgColor
         progressBar.anchorPoint = CGPoint(x: 0, y: 0.5)
         progressBar.position = CGPoint(x: 0, y: countdownTrack.bounds.midY)
         countdownTrack.addSublayer(progressBar)
@@ -352,7 +352,7 @@ private final class DictionarySuggestionPromptView: NSView {
         iconView.image = NSImage(systemSymbolName: "text.book.closed", accessibilityDescription: "Dictionary")
             ?? NSImage(systemSymbolName: "text.quote", accessibilityDescription: "Dictionary")
         iconView.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
-        iconView.contentTintColor = NSColor.white.withAlphaComponent(0.86)
+        iconView.contentTintColor = MuesliTheme.panelDismissTintNSColor
         iconView.imageScaling = .scaleProportionallyUpOrDown
         iconView.frame = NSRect(x: 14, y: cardFrame.height - 42, width: iconSize, height: iconSize)
         cardView.addSubview(iconView)
@@ -366,14 +366,18 @@ private final class DictionarySuggestionPromptView: NSView {
         let addX = ignoreX - buttonGap - buttonWidth
         let textWidth = cardFrame.width - textX - 14
 
-        let title = label("Add correction?", font: .systemFont(ofSize: 13, weight: .semibold), color: .white)
+        let title = label(
+            "Add correction?",
+            font: MuesliTheme.appKitFont(size: 13, weight: .semibold),
+            color: MuesliTheme.panelPrimaryTextNSColor
+        )
         title.frame = NSRect(x: textX, y: 66, width: textWidth, height: 18)
         cardView.addSubview(title)
 
         let detail = label(
             "\"\(suggestion.observed)\" -> \"\(suggestion.replacement)\"",
-            font: .systemFont(ofSize: 13),
-            color: NSColor.white.withAlphaComponent(0.72),
+            font: MuesliTheme.appKitFont(size: 13, weight: .regular),
+            color: MuesliTheme.panelDetailTextNSColor,
             lineBreakMode: .byTruncatingMiddle
         )
         detail.toolTip = "\"\(suggestion.observed)\" -> \"\(suggestion.replacement)\""
@@ -404,15 +408,15 @@ private final class DictionarySuggestionPromptView: NSView {
 
     private func button(title: String, action: Selector, isPrimary: Bool) -> NSButton {
         let button = NSButton(title: title, target: self, action: action)
-        button.font = .systemFont(ofSize: 12, weight: .medium)
+        button.font = MuesliTheme.appKitFont(size: 12, weight: .medium)
         button.wantsLayer = true
         button.layer?.backgroundColor = isPrimary
-            ? NSColor(red: 0.2, green: 0.5, blue: 1.0, alpha: 1.0).cgColor
-            : NSColor.white.withAlphaComponent(0.12).cgColor
-        button.layer?.cornerRadius = 6
+            ? MuesliTheme.panelPrimaryActionNSColor.cgColor
+            : MuesliTheme.panelSecondaryButtonNSColor.cgColor
+        button.layer?.cornerRadius = MuesliTheme.cornerSmall
         button.isBordered = false
         button.focusRingType = .none
-        button.contentTintColor = .white
+        button.contentTintColor = isPrimary ? .white : MuesliTheme.panelPrimaryTextNSColor
         return button
     }
 

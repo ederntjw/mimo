@@ -84,12 +84,17 @@ tmp-install/
 !assets/audio/quill-release.wav
 *.sqlite
 *.db
+/test-audio/
+
+# Separate mobile companion checkout (maintained in its own repository)
+/muesli-ios/
 
 # Signing/certificates & releases
 developerID_application.cer
 dist-notary/
 dist-preprod/
 dist-release/
+dist-share/
 scripts/notarize_dmg.sh
 scripts/dev-test.sh
 

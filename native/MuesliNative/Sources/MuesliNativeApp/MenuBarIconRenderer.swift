@@ -11,7 +11,7 @@ enum MenuBarIconRenderer {
     static let canonicalMarkMask: CGImage? = loadCanonicalMarkMask()
 
     static let options: [(id: String, label: String)] = [
-        ("muesli", "Muesli Logo"),
+        ("muesli", "Mimo Logo"),
         ("mic.fill", "Microphone"),
         ("waveform", "Waveform"),
         ("bubble.left.fill", "Bubble"),
@@ -33,7 +33,7 @@ enum MenuBarIconRenderer {
             return makeMuesliMark()
         }
         let config = NSImage.SymbolConfiguration(pointSize: 16, weight: .regular)
-        let image = NSImage(systemSymbolName: choice, accessibilityDescription: "Muesli")?
+        let image = NSImage(systemSymbolName: choice, accessibilityDescription: AppIdentity.displayName)?
             .withSymbolConfiguration(config)
         image?.isTemplate = true
         return image
@@ -223,7 +223,7 @@ enum MenuBarIconRenderer {
 
         let image = NSImage(
             systemSymbolName: "waveform",
-            accessibilityDescription: "Muesli"
+            accessibilityDescription: AppIdentity.displayName
         ) ?? NSImage(size: displaySize)
         image.size = displaySize
         image.isTemplate = true

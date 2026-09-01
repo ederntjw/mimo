@@ -160,7 +160,7 @@ struct SidebarView: View {
                 .padding(.bottom, MuesliTheme.spacing16)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(MuesliTheme.backgroundDeep)
+        .background(SidebarThemeBackground())
     }
 
     private var sidebarToggleButton: some View {
@@ -225,7 +225,7 @@ struct SidebarView: View {
                 .padding(.bottom, MuesliTheme.spacing16)
         }
         .frame(maxHeight: .infinity)
-        .background(MuesliTheme.backgroundDeep)
+        .background(SidebarThemeBackground())
         .onChange(of: appState.selectedTab) { _, tab in
             if tab == .meetings {
                 meetingsExpanded = true
@@ -279,7 +279,8 @@ struct SidebarView: View {
                     }
                     .frame(width: 22, height: 22)
                     .foregroundStyle(MuesliTheme.accent)
-                    Text("muesli")
+                    .overlay(MuesliBrandThemeAccents())
+                    Text(AppIdentity.brandName)
                         .font(MuesliTheme.title2())
                         .foregroundStyle(MuesliTheme.textPrimary)
                 }
@@ -539,7 +540,7 @@ struct SidebarView: View {
                 socialShareRow(
                     imageName: "x-logo",
                     fallbackIcon: "bubble.left.and.bubble.right.fill",
-                    label: "Tweet about Muesli",
+                    label: "Tweet about \(AppIdentity.displayName)",
                     action: { controller.openContributionSidebarShare(.tweetAboutMuesli) }
                 )
                 socialShareRow(
@@ -822,6 +823,26 @@ struct SidebarView: View {
             renamingFolderName = "New Folder"
             controller.showMeetingsHome(folderID: id)
         }
+    }
+}
+
+private struct SidebarThemeBackground: View {
+    var body: some View {
+        ZStack {
+            MuesliTheme.backgroundDeep
+            MuesliTheme.navigationBase
+            LinearGradient(
+                colors: [MuesliTheme.navigationTint, .clear],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(MuesliTheme.navigationBorder)
+                .frame(width: 1)
+        }
+        .shadow(color: MuesliTheme.navigationShadow, radius: 12, x: 3, y: 0)
     }
 }
 

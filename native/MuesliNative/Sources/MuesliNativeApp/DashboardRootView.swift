@@ -103,6 +103,8 @@ struct DashboardRootView: View {
             minWidth: DashboardWindowLayout.minimumContentWidth,
             minHeight: DashboardWindowLayout.minimumContentHeight
         )
+        .tint(MuesliTheme.accent)
+        .muesliThemeTypography()
         .preferredColorScheme(appState.config.darkMode ? .dark : .light)
         .onPreferenceChange(FeatureTourTargetPreferenceKey.self) { frames in
             guard FeatureTourFrameTracking.hasMeaningfulChange(
@@ -122,34 +124,28 @@ struct DashboardRootView: View {
                     .frame(width: proxy.size.width, height: proxy.size.height)
                     .zIndex(101)
                 } else if let tour = appState.activeFeatureTour,
-                          tour.steps.indices.contains(appState.featureTourStepIndex) {
-                    let step = tour.steps[appState.featureTourStepIndex]
+                   tour.steps.indices.contains(appState.featureTourStepIndex),
+                   let globalTargetFrame = featureTourTargetFrames[tour.steps[appState.featureTourStepIndex].target] {
                     let globalRootFrame = proxy.frame(in: .global)
-                    let targetFrame = step.target
-                        .flatMap { featureTourTargetFrames[$0] }
-                        .map {
-                            $0.offsetBy(
-                                dx: -globalRootFrame.minX,
-                                dy: -globalRootFrame.minY
-                            )
-                        }
-                    if step.target == nil || targetFrame != nil {
-                        FeatureTourOverlay(
-                            tour: tour,
-                            stepIndex: appState.featureTourStepIndex,
-                            spotlightRect: targetFrame,
-                            containerSize: proxy.size,
-                            onBack: { controller.showPreviousFeatureTourStep() },
-                            onNext: { controller.showNextFeatureTourStep() },
-                            onDismiss: { controller.dismissFeatureTour() }
-                        )
-                        .zIndex(100)
-                    }
+                    let targetFrame = globalTargetFrame.offsetBy(
+                        dx: -globalRootFrame.minX,
+                        dy: -globalRootFrame.minY
+                    )
+                    FeatureTourOverlay(
+                        tour: tour,
+                        stepIndex: appState.featureTourStepIndex,
+                        spotlightRect: targetFrame,
+                        containerSize: proxy.size,
+                        onBack: { controller.showPreviousFeatureTourStep() },
+                        onNext: { controller.showNextFeatureTourStep() },
+                        onDismiss: { controller.dismissFeatureTour() }
+                    )
+                    .zIndex(100)
                 }
             }
         }
         .alert(
-            appState.contributionMilestonePrompt?.title ?? "Muesli milestone",
+            appState.contributionMilestonePrompt?.title ?? "\(AppIdentity.displayName) milestone",
             isPresented: Binding(
                 get: { appState.contributionMilestonePrompt != nil },
                 set: { if !$0 { controller.dismissContributionMilestonePrompt() } }
@@ -166,12 +162,12 @@ struct DashboardRootView: View {
                 }
             }
             if appState.contributionMilestonePrompt?.showTweetAboutMuesli == true {
-                Button("Tweet about Muesli") {
+                Button("Tweet about \(AppIdentity.displayName)") {
                     controller.openContributionMilestoneAction(.tweetAboutMuesli)
                 }
             }
             if appState.contributionMilestonePrompt?.showPostOnLinkedIn == true {
-                Button("Post about Muesli on LinkedIn") {
+                Button("Post about \(AppIdentity.displayName) on LinkedIn") {
                     controller.openContributionMilestoneAction(.postOnLinkedIn)
                 }
             }

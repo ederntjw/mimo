@@ -132,7 +132,7 @@ struct DictationRowView: View {
                         Button { showDeleteConfirmation = true } label: {
                             Image(systemName: "trash")
                                 .font(.system(size: 12))
-                                .foregroundStyle(.red.opacity(0.6))
+                                .foregroundStyle(MuesliTheme.destructive.opacity(0.6))
                         }
                         .buttonStyle(.plain)
                     }

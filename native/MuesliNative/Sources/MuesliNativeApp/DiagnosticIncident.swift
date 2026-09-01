@@ -228,7 +228,10 @@ struct DiagnosticIncident: Codable, Equatable, Identifiable, Sendable {
     }
 
     var githubIssueURL: URL? {
-        var components = URLComponents(string: "https://github.com/Muesli-HQ/muesli/issues/new")
+        var components = URLComponents(
+            url: AppIdentity.newIssueURL,
+            resolvingAgainstBaseURL: false
+        )
         components?.queryItems = [
             URLQueryItem(name: "title", value: issueTitle),
             URLQueryItem(name: "body", value: issueBody),
@@ -236,6 +239,6 @@ struct DiagnosticIncident: Codable, Equatable, Identifiable, Sendable {
         return components?.url
     }
 
-    static let githubIssueFallbackURL = URL(string: "https://github.com/Muesli-HQ/muesli/issues/new")!
+    static let githubIssueFallbackURL = AppIdentity.newIssueURL
 
 }

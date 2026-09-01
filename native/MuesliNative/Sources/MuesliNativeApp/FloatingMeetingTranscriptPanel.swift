@@ -256,11 +256,12 @@ private struct FloatingMeetingTranscriptPanelView: View {
             )
             .background(.ultraThinMaterial)
             .background(MuesliTheme.backgroundRaised.opacity(0.94))
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall, style: .continuous)
                     .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
             }
+            .muesliThemeTypography()
             .onHover(perform: onHoverChanged)
         }
     }

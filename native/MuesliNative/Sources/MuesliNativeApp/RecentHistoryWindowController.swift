@@ -145,6 +145,7 @@ final class RecentHistoryWindowController: NSObject, NSWindowDelegate {
         if window.appearance?.name != name {
             window.appearance = NSAppearance(named: name)
         }
+        window.backgroundColor = MuesliTheme.backgroundDeepNSColor
     }
 
     func close() {

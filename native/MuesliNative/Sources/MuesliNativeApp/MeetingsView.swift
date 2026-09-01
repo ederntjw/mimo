@@ -527,8 +527,8 @@ struct MeetingsView: View {
         return "\(f.string(from: event.startDate)) – \(f.string(from: event.endDate))"
     }
 
-    private static let joinActionGreen = Color(nsColor: NSColor(red: 0.20, green: 0.72, blue: 0.53, alpha: 1.0))
-    private static let joinActionGreenDarker = Color(nsColor: NSColor(red: 0.15, green: 0.58, blue: 0.42, alpha: 1.0))
+    private static var joinActionGreen: Color { Color(nsColor: MuesliTheme.joinActionNSColor) }
+    private static var joinActionGreenDarker: Color { Color(nsColor: MuesliTheme.joinActionSecondaryNSColor) }
 
     /// Split control mirroring the meeting notification panel: the primary segment runs
     /// the default action from Settings, the chevron offers the other two.
@@ -686,6 +686,31 @@ struct MeetingsView: View {
     private var browserHeaderActions: some View {
         HStack(spacing: MuesliTheme.spacing8) {
             Button {
+                controller.startMeetingRecordingFromEntryPoint(title: "Live Meeting")
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "waveform.and.mic")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Start Live Meeting")
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, MuesliTheme.spacing12)
+                .padding(.vertical, 8)
+                .background(appState.isMeetingRecording || appState.isMeetingStarting ? MuesliTheme.surfacePrimary : MuesliTheme.recording)
+                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                .overlay(alignment: .topTrailing) {
+                    MuesliPrimaryActionThemeAccents()
+                        .offset(x: 5, y: -5)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+            .help("Record and transcribe while a rolling summary and meeting Q&A stay available")
+            .fixedSize()
+
+            Button {
                 controller.startQuickNoteMeeting()
             } label: {
                 HStack(spacing: 6) {
@@ -784,9 +809,9 @@ struct MeetingsView: View {
                 controller.showMeetingDocument(id: meeting.id)
             } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "square.and.pencil")
+                    Image(systemName: "sparkles")
                         .font(.system(size: 11, weight: .semibold))
-                    Text("Open Notes")
+                    Text("Open Live Summary")
                         .font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundStyle(MuesliTheme.textPrimary)

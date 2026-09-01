@@ -29,6 +29,7 @@ case "${shard}" in
       FloatingIndicatorVisibilityTests
       IndicatorFrameSizeTests
       WindowAppearanceTests
+      VisualThemeTests
       OpenAILogoShapeTests
       StandardMenuShortcutTests
       MeetingChunkCollectorTests
@@ -97,6 +98,7 @@ case "${shard}" in
       MeetingFollowUpPolicyTests
       MeetingFollowUpThreadTests
       MeetingFollowUpSummaryPromptTests
+      LiveMeetingAssistantTests
       MeetingSummaryClientTests
       MeetingsNavigationTests
       MeetingBrowserLogicTests

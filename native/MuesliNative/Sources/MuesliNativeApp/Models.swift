@@ -1515,7 +1515,7 @@ struct AppConfig: Codable {
     var userName: String = ""
     var customMeetingTemplates: [CustomMeetingTemplate] = []
     var customWords: [CustomWord] = [
-        CustomWord(word: "muesli", replacement: "muesli"),
+        CustomWord(word: "mimo", replacement: "mimo"),
     ]
     var dictionarySuggestions: [DictionarySuggestion] = []
     var dismissedDictionarySuggestionKeys: [String] = []
@@ -1526,6 +1526,7 @@ struct AppConfig: Codable {
     var quilSoundEnabled: Bool = true
     var pauseMediaDuringDictation: Bool = false
     var muteSystemAudioDuringDictation: Bool = false
+    var visualTheme: String = MuesliVisualTheme.classic.rawValue
     var recordingColorHex: String = "1e1e2e"   // Catppuccin Mocha base, without #
     var menuBarIcon: String = "muesli"
     var showHotkeyInMenuBar: Bool = true
@@ -1662,6 +1663,7 @@ struct AppConfig: Codable {
         case quilSoundEnabled = "quil_sound_enabled"
         case pauseMediaDuringDictation = "pause_media_during_dictation"
         case muteSystemAudioDuringDictation = "mute_system_audio_during_dictation"
+        case visualTheme = "visual_theme"
         case recordingColorHex = "recording_color_hex"
         case menuBarIcon = "menu_bar_icon"
         case showHotkeyInMenuBar = "show_hotkey_in_menu_bar"
@@ -1859,6 +1861,7 @@ struct AppConfig: Codable {
         quilSoundEnabled = (try? c.decode(Bool.self, forKey: .quilSoundEnabled)) ?? defaults.quilSoundEnabled
         pauseMediaDuringDictation = (try? c.decode(Bool.self, forKey: .pauseMediaDuringDictation)) ?? defaults.pauseMediaDuringDictation
         muteSystemAudioDuringDictation = (try? c.decode(Bool.self, forKey: .muteSystemAudioDuringDictation)) ?? defaults.muteSystemAudioDuringDictation
+        visualTheme = MuesliVisualTheme.resolved(try? c.decode(String.self, forKey: .visualTheme)).rawValue
         recordingColorHex = (try? c.decode(String.self, forKey: .recordingColorHex)) ?? defaults.recordingColorHex
         menuBarIcon = (try? c.decode(String.self, forKey: .menuBarIcon)) ?? defaults.menuBarIcon
         showHotkeyInMenuBar =

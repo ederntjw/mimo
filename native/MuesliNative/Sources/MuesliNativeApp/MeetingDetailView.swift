@@ -9,6 +9,7 @@ private enum MeetingDocumentMode: Hashable {
 private enum RecordingContentMode: Hashable {
     case notes
     case live
+    case assistant
 }
 
 private enum ManualNotesSaveStatus {
@@ -135,6 +136,7 @@ struct MeetingDetailView: View {
         _loadedMeetingID = State(initialValue: meeting?.id)
         _pendingTemplateID = State(initialValue: initialTemplateID)
         _documentMode = State(initialValue: meeting.map(Self.defaultDocumentMode(for:)) ?? .notes)
+        _recordingMode = State(initialValue: meeting?.status == .recording ? .assistant : .notes)
     }
 
     var body: some View {
@@ -581,6 +583,17 @@ struct MeetingDetailView: View {
                         .allowsHitTesting(recordingMode == .live)
                         .accessibilityHidden(recordingMode != .live)
 
+                    LiveMeetingAssistantSection(
+                        appState: appState,
+                        meetingID: meeting.id,
+                        controller: controller,
+                        isActive: recordingMode == .assistant
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .opacity(recordingMode == .assistant ? 1 : 0)
+                    .allowsHitTesting(recordingMode == .assistant)
+                    .accessibilityHidden(recordingMode != .assistant)
+
                 }
             } else {
                 let isManualNotesEditable = canEditManualNotes(for: meeting)
@@ -686,11 +699,13 @@ struct MeetingDetailView: View {
     private var recordingModePicker: some View {
         Picker("", selection: $recordingMode) {
             Text("Notes").tag(RecordingContentMode.notes)
-            Text("Live").tag(RecordingContentMode.live)
+            Text("Transcript").tag(RecordingContentMode.live)
+            Text("Live Summary").tag(RecordingContentMode.assistant)
         }
         .pickerStyle(.segmented)
         .tint(MuesliTheme.accent)
-        .frame(width: usesCompactQuickNotes ? 124 : 180)
+        .frame(width: usesCompactQuickNotes ? 260 : 320)
+        .help("Switch between notes, the live transcript, and live summary with meeting Q&A")
     }
 
     private func showsManualNotesEditor(for meeting: MeetingRecord) -> Bool {
@@ -1812,6 +1827,7 @@ struct MeetingDetailView: View {
         pendingTemplateID = meeting.map { controller.meetingTemplateSnapshot(for: $0).id } ?? controller.defaultMeetingTemplate().id
         if meetingChanged {
             documentMode = meeting.map(Self.defaultDocumentMode(for:)) ?? .notes
+            recordingMode = meeting?.status == .recording ? .assistant : .notes
             isEditingNotes = false
             isEditingTranscript = false
             showFolderPopover = false

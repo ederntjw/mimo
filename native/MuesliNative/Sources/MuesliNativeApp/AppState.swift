@@ -203,6 +203,12 @@ final class AppState {
     /// source; owner-gated by `liveMeetingTranscriptOwnerID` like the transcript.
     var liveMeetingPartialYou: String = ""
     var liveMeetingPartialOthers: String = ""
+    var liveMeetingSummary: String = ""
+    var liveMeetingSummaryUpdatedAt: Date?
+    var isLiveMeetingSummaryRefreshing: Bool = false
+    var liveMeetingAssistantMessages: [LiveMeetingAssistantMessage] = []
+    var isLiveMeetingAssistantAnswering: Bool = false
+    var liveMeetingAssistantError: String?
     var activeMeetingAudioWarning: ActiveMeetingAudioWarning?
     var dictationState: DictationState = .idle
     var isVoiceNoteRecording: Bool = false

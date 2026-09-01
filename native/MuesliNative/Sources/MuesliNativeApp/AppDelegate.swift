@@ -138,7 +138,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         settingsItem.target = self
         appMenu.addItem(settingsItem)
         let whatsNewItem = NSMenuItem(
-            title: "What's New in Muesli",
+            title: "What's New in \(AppIdentity.displayName)",
             action: #selector(AppDelegate.showWhatsNew(_:)),
             keyEquivalent: ""
         )

@@ -225,10 +225,10 @@ struct DiagnosticIncidentTests {
         )
 
         let url = try #require(incident.githubIssueURL)
-        #expect(url.absoluteString.hasPrefix("https://github.com/Muesli-HQ/muesli/issues/new?"))
+        #expect(url.absoluteString.hasPrefix("https://github.com/ederntjw/mimo/issues/new?"))
         #expect(url.absoluteString.contains("title="))
         #expect(url.absoluteString.contains("body="))
-        #expect(DiagnosticIncident.githubIssueFallbackURL.absoluteString == "https://github.com/Muesli-HQ/muesli/issues/new")
+        #expect(DiagnosticIncident.githubIssueFallbackURL.absoluteString == "https://github.com/ederntjw/mimo/issues/new")
     }
 }
 

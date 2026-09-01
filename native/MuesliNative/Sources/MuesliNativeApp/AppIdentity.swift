@@ -2,7 +2,12 @@ import Foundation
 import MuesliCore
 
 public enum AppIdentity {
-    private static let defaultName = "Muesli"
+    private static let defaultName = "Mimo"
+
+    static let brandName = "mimo"
+
+    static let sourceRepositoryURL = URL(string: "https://github.com/ederntjw/mimo")!
+    static let newIssueURL = sourceRepositoryURL.appending(path: "issues/new")
 
     static var bundleName: String {
         stringValue(for: "CFBundleName") ?? defaultName

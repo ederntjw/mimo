@@ -8,6 +8,7 @@ enum QuilTransformationError: LocalizedError, Equatable {
     case selectionChanged
     case unsupportedModel
     case modelUnavailable
+    case configurationRequired(String)
     case emptyResponse
     case responseTooLong(Int)
     case nonReplacementResponse
@@ -27,7 +28,9 @@ enum QuilTransformationError: LocalizedError, Equatable {
         case .unsupportedModel:
             return "The selected model cannot follow general Quill instructions. Choose another Quill model."
         case .modelUnavailable:
-            return "The selected Quill model is not downloaded or configured."
+            return "The selected Quill model is not ready. Open Settings → Dictation → Quill to download a compatible local model or choose a configured hosted source."
+        case .configurationRequired(let message):
+            return message
         case .emptyResponse:
             return "The model returned an empty response, so Quill did not paste anything."
         case .responseTooLong(let limit):
@@ -152,5 +155,101 @@ enum QuilModelPolicy {
         }
         let limit = backend.isOnDevice ? localMaximumInputCharacters : remoteMaximumInputCharacters
         guard selectedText.count <= limit else { throw QuilTransformationError.selectionTooLong(limit) }
+    }
+}
+
+enum QuilConfigurationStatus: Equatable {
+    case ready(String)
+    case needsSetup(String)
+
+    var isReady: Bool {
+        if case .ready = self { return true }
+        return false
+    }
+
+    var message: String {
+        switch self {
+        case .ready(let message), .needsSetup(let message):
+            return message
+        }
+    }
+}
+
+enum QuilConfigurationPolicy {
+    static func status(
+        backend: TranscriptCleanupBackendOption,
+        model: String,
+        config: AppConfig,
+        isChatGPTAuthenticated: Bool,
+        localModelAvailable: Bool? = nil,
+        gemmaModelAvailable: Bool? = nil
+    ) -> QuilConfigurationStatus {
+        let trimmedModel = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedModel = trimmedModel.isEmpty
+            ? TranscriptCleanupClient.defaultModel(for: backend)
+            : trimmedModel
+
+        if backend == .local {
+            let option = PostProcessorOption.resolve(id: resolvedModel)
+            guard option.supportsQuil else {
+                return .needsSetup(
+                    "The selected local model is tuned for transcript cleanup, not rewriting. Choose Qwen 3.5 0.8B (General)."
+                )
+            }
+            let isAvailable = localModelAvailable
+                ?? (option.isDownloaded || Qwen3PostProcessorConfig.devOverrideURL() != nil)
+            guard isAvailable else {
+                return .needsSetup(
+                    "No compatible local Quill model is downloaded. Download Qwen 3.5 0.8B (General), or switch Model source to ChatGPT."
+                )
+            }
+            return .ready("Ready with \(option.quilLabel).")
+        }
+
+        if backend == .gemma4LiteRT {
+            let gemmaModel = Gemma4LiteRTModel.resolved(resolvedModel)
+            let isAvailable = gemmaModelAvailable
+                ?? Gemma4LiteRTModelStore.isAvailableLocally(model: gemmaModel)
+            guard isAvailable else {
+                return .needsSetup("The selected Gemma 4 model is not downloaded.")
+            }
+            return .ready("Ready with \(gemmaModel.label).")
+        }
+
+        var readinessConfig = config
+        if backend == .hosted(.lmStudio) {
+            readinessConfig.postProcessorLMStudioModel = resolvedModel
+        } else if backend == .hosted(.customLLM) {
+            readinessConfig.postProcessorCustomLLMModel = resolvedModel
+        }
+
+        guard TranscriptCleanupClient.hasRequiredSettings(
+            for: backend,
+            config: readinessConfig,
+            isChatGPTAuthenticated: isChatGPTAuthenticated
+        ) else {
+            let message: String
+            switch backend.llmBackend {
+            case .some(.chatGPT):
+                message = "Sign in to ChatGPT before using it for Quill."
+            case .some(.openAI):
+                message = "Add an OpenAI API key before using it for Quill."
+            case .some(.openRouter):
+                message = "Connect OpenRouter before using it for Quill."
+            case .some(.ollama):
+                message = "Enter a valid Ollama URL before using it for Quill."
+            case .some(.lmStudio):
+                message = "Enter the loaded LM Studio model before using it for Quill."
+            case .some(.customLLM):
+                message = "Complete the Custom LLM URL, model, and credential settings before using Quill."
+            case nil:
+                message = "Finish configuring the selected Quill model source."
+            default:
+                message = "Finish configuring the selected Quill model source."
+            }
+            return .needsSetup(message)
+        }
+
+        return .ready("Ready with \(backend.label) · \(resolvedModel).")
     }
 }

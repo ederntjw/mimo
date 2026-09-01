@@ -200,6 +200,56 @@ struct QuilTransformationTests {
         )
     }
 
+    @Test("Quill readiness explains missing local models and accepts configured ChatGPT")
+    func configurationReadiness() {
+        let config = AppConfig()
+        let missingLocal = QuilConfigurationPolicy.status(
+            backend: .local,
+            model: PostProcessorOption.defaultQuilOption.id,
+            config: config,
+            isChatGPTAuthenticated: false,
+            localModelAvailable: false
+        )
+        #expect(!missingLocal.isReady)
+        #expect(missingLocal.message.contains("No compatible local Quill model"))
+        #expect(missingLocal.message.contains("switch Model source to ChatGPT"))
+
+        let readyLocal = QuilConfigurationPolicy.status(
+            backend: .local,
+            model: PostProcessorOption.defaultQuilOption.id,
+            config: config,
+            isChatGPTAuthenticated: false,
+            localModelAvailable: true
+        )
+        #expect(readyLocal.isReady)
+
+        let chatGPTBackend = TranscriptCleanupBackendOption.hosted(.chatGPT)
+        let signedOut = QuilConfigurationPolicy.status(
+            backend: chatGPTBackend,
+            model: "gpt-5.6-terra",
+            config: config,
+            isChatGPTAuthenticated: false
+        )
+        #expect(!signedOut.isReady)
+        #expect(signedOut.message == "Sign in to ChatGPT before using it for Quill.")
+
+        let signedIn = QuilConfigurationPolicy.status(
+            backend: chatGPTBackend,
+            model: "gpt-5.6-terra",
+            config: config,
+            isChatGPTAuthenticated: true
+        )
+        #expect(signedIn.isReady)
+        #expect(signedIn.message.contains("gpt-5.6-terra"))
+    }
+
+    @Test("Quill model errors direct users to the visible model controls")
+    func modelUnavailableIsActionable() {
+        let message = QuilTransformationError.modelUnavailable.localizedDescription
+        #expect(message.contains("Settings → Dictation → Quill"))
+        #expect(message.contains("choose a configured hosted source"))
+    }
+
     @Test("Quill defaults to a disabled Fn shortcut and round trips")
     func configRoundTrip() throws {
         var config = AppConfig()

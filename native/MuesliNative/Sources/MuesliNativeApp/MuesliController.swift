@@ -8894,8 +8894,13 @@ public final class MuesliController: NSObject {
 
     private func handleQuilPrepare() {
         guard canPrepareQuil else { return }
+        guard ensureQuilConfigurationReady() else { return }
         quilSelectionSnapshot = nil
         quilTargetCaptureError = nil
+        // Capture the highlighted target before audio startup can perturb focus
+        // or a browser selection. The stream-active callback retries if AX was
+        // not ready yet, so recording startup never depends on this succeeding.
+        captureQuilTargetIfNeeded()
         meetingMonitor.suppressWhileActive()
         meetingMonitor.refreshState()
         setState(.preparing)
@@ -8905,6 +8910,8 @@ public final class MuesliController: NSObject {
 
     private func handleQuilStart() {
         guard canStartQuil else { return }
+        guard ensureQuilConfigurationReady() else { return }
+        captureQuilTargetIfNeeded()
         quilStartedAt = Date()
         indicator.powerProvider = { [weak self] in
             self?.quilAudioSessionManager.currentPower() ?? -160
@@ -8930,6 +8937,20 @@ public final class MuesliController: NSObject {
                 fputs("[quil] target capture deferred failure: \(error)\n", stderr)
             }
         }
+    }
+
+    @discardableResult
+    private func ensureQuilConfigurationReady() -> Bool {
+        let backend = TranscriptCleanupBackendOption.resolved(config.quilBackend)
+        let status = QuilConfigurationPolicy.status(
+            backend: backend,
+            model: config.quilModel,
+            config: config,
+            isChatGPTAuthenticated: chatGPTAuth.isAuthenticated
+        )
+        guard !status.isReady else { return true }
+        presentQuilFailure(QuilTransformationError.configurationRequired(status.message))
+        return false
     }
 
     private func handleQuilToggleStart() {
@@ -10075,10 +10096,8 @@ public final class MuesliController: NSObject {
             SoundController.playQuillStart(
                 enabled: shouldPlayQuilLifecycleSounds && !isDictationTestMode
             )
-            // Mic activation is the primary Quill interaction. Discover the
-            // selection/insertion target only after the stream and activation cue
-            // are live, so AX or Google Docs clipboard fallback work cannot delay
-            // or suppress recording. A missing target is reported after release.
+            // Preparation captures the target before audio startup. Retry here
+            // when AX or a browser clipboard fallback was not ready on key-down.
             captureQuilTargetIfNeeded()
         case .speechDetected(let sessionID, _):
             guard activeQuilAudioSessionID == sessionID else { break }

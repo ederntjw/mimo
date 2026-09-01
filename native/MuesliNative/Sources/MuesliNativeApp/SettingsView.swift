@@ -320,6 +320,15 @@ struct SettingsView: View {
         QuilModelSourceOption.resolved(for: selectedQuilBackend)
     }
 
+    private var quilConfigurationStatus: QuilConfigurationStatus {
+        QuilConfigurationPolicy.status(
+            backend: selectedQuilBackend,
+            model: appState.config.quilModel,
+            config: appState.config,
+            isChatGPTAuthenticated: appState.isChatGPTAuthenticated
+        )
+    }
+
     private var quilLocalModels: [OnDeviceCleanupModel] {
         var models = downloadedPostProcOptions
             .filter(\.supportsQuil)
@@ -1385,50 +1394,65 @@ struct SettingsView: View {
                         controller.updateConfig { $0.quilSoundEnabled = newValue }
                     }
                 }
+            }
+            Divider().background(MuesliTheme.surfaceBorder)
+            settingsRow(
+                "Model source",
+                description: "Choose an on-device rewrite model or a connected hosted account.",
+                controlWidth: meetingControlWidth
+            ) {
+                settingsMenu(
+                    selection: selectedQuilModelSource.label,
+                    options: QuilModelSourceOption.all.map(\.label)
+                ) { label in
+                    guard let source = QuilModelSourceOption.all.first(where: { $0.label == label }) else {
+                        return
+                    }
+                    if source == .localModels {
+                        if !selectedQuilBackend.isOnDevice {
+                            selectQuilLocalModel(quilLocalModels.first)
+                        }
+                    } else if let backend = source.hostedBackend {
+                        controller.updateConfig {
+                            $0.quilBackend = backend.backend
+                            $0.quilModel = TranscriptCleanupClient.defaultModel(for: backend)
+                        }
+                    }
+                }
+            }
+            if selectedQuilBackend.isOnDevice {
                 Divider().background(MuesliTheme.surfaceBorder)
-                settingsRow("Model source", controlWidth: meetingControlWidth) {
-                    settingsMenu(
-                        selection: selectedQuilModelSource.label,
-                        options: QuilModelSourceOption.all.map(\.label)
-                    ) { label in
-                        guard let source = QuilModelSourceOption.all.first(where: { $0.label == label }) else {
-                            return
+                settingsRow("Quill model", controlWidth: meetingControlWidth) {
+                    if quilLocalModels.isEmpty {
+                        compactActionButton("Download a model", systemImage: "arrow.down.circle") {
+                            controller.showModels(category: .postProcessing)
                         }
-                        if source == .localModels {
-                            if !selectedQuilBackend.isOnDevice {
-                                selectQuilLocalModel(quilLocalModels.first)
+                        .frame(width: meetingControlWidth, alignment: .trailing)
+                    } else {
+                        FixedWidthPopUp(
+                            selection: selectedQuilLocalModelLabel,
+                            options: quilLocalModels.map(\.quilLabel),
+                            onSelectIndex: { index in
+                                guard quilLocalModels.indices.contains(index) else { return }
+                                selectQuilLocalModel(quilLocalModels[index])
                             }
-                        } else if let backend = source.hostedBackend {
-                            controller.updateConfig {
-                                $0.quilBackend = backend.backend
-                                $0.quilModel = TranscriptCleanupClient.defaultModel(for: backend)
-                            }
-                        }
+                        )
+                        .frame(height: 24)
                     }
                 }
-                if selectedQuilBackend.isOnDevice {
-                    Divider().background(MuesliTheme.surfaceBorder)
-                    settingsRow("Quill model", controlWidth: meetingControlWidth) {
-                        if quilLocalModels.isEmpty {
-                            compactActionButton("View local models", systemImage: "arrow.right") {
-                                controller.showModels(category: .postProcessing)
-                            }
-                            .frame(width: meetingControlWidth, alignment: .trailing)
-                        } else {
-                            FixedWidthPopUp(
-                                selection: selectedQuilLocalModelLabel,
-                                options: quilLocalModels.map(\.quilLabel),
-                                onSelectIndex: { index in
-                                    guard quilLocalModels.indices.contains(index) else { return }
-                                    selectQuilLocalModel(quilLocalModels[index])
-                                }
-                            )
-                            .frame(height: 24)
-                        }
-                    }
-                } else {
-                    hostedQuilSettings(for: selectedQuilBackend)
-                }
+            } else {
+                hostedQuilSettings(for: selectedQuilBackend)
+            }
+            Divider().background(MuesliTheme.surfaceBorder)
+            settingsRow(
+                quilConfigurationStatus.isReady ? "Quill is ready" : "Quill needs setup",
+                description: quilConfigurationStatus.message,
+                controlWidth: meetingControlWidth
+            ) {
+                Image(systemName: quilConfigurationStatus.isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(quilConfigurationStatus.isReady ? MuesliTheme.success : MuesliTheme.streak)
+                    .accessibilityLabel(quilConfigurationStatus.isReady ? "Ready" : "Setup needed")
             }
         }
     }
@@ -1448,6 +1472,13 @@ struct SettingsView: View {
             settingsRow("Account", controlWidth: meetingControlWidth) {
                 chatGPTAccountControl(selectMeetingSummaryBackend: false)
             }
+            Divider().background(MuesliTheme.surfaceBorder)
+            settingsRow("Quill model", controlWidth: meetingControlWidth) {
+                settingsModelMenu(
+                    currentModel: appState.config.quilModel,
+                    presets: SummaryModelPreset.chatGPTTranscriptCleanupModels
+                ) { value in controller.updateConfig { $0.quilModel = value } }
+            }
         } else if backend == .hosted(.openAI) {
             Divider().background(MuesliTheme.surfaceBorder)
             settingsRow("API Key", controlWidth: meetingControlWidth) {
@@ -1457,10 +1488,31 @@ struct SettingsView: View {
                     onChange: { value in controller.updateConfig { $0.openAIAPIKey = value } }
                 ).frame(height: 22)
             }
+            Divider().background(MuesliTheme.surfaceBorder)
+            settingsRow("Quill model", controlWidth: meetingControlWidth) {
+                settingsModelMenu(
+                    currentModel: appState.config.quilModel,
+                    presets: SummaryModelPreset.openAIModels
+                ) { value in controller.updateConfig { $0.quilModel = value } }
+            }
         } else if backend == .hosted(.openRouter) {
             Divider().background(MuesliTheme.surfaceBorder)
             settingsRow("Account", controlWidth: meetingControlWidth) {
                 openRouterAccountControl(selectMeetingSummaryBackend: false)
+            }
+            Divider().background(MuesliTheme.surfaceBorder)
+            settingsRow("Quill model", controlWidth: meetingControlWidth) {
+                settingsModelMenu(
+                    currentModel: appState.config.quilModel,
+                    presets: SummaryModelPreset.openRouterModels
+                ) { value in controller.updateConfig { $0.quilModel = value } }
+            }
+            Divider().background(MuesliTheme.surfaceBorder)
+            settingsRow("Custom model ID", controlWidth: meetingControlWidth) {
+                settingsModelTextField(
+                    currentModel: appState.config.quilModel,
+                    placeholder: "provider/model"
+                ) { value in controller.updateConfig { $0.quilModel = value } }
             }
         } else if backend == .hosted(.ollama) {
             Divider().background(MuesliTheme.surfaceBorder)
@@ -1485,7 +1537,7 @@ struct SettingsView: View {
                 controller.updateConfig { $0.quilModel = value }
             }
         }
-        if backend != .hosted(.customLLM) {
+        if backend == .hosted(.ollama) || backend == .hosted(.lmStudio) {
             Divider().background(MuesliTheme.surfaceBorder)
             settingsRow("Quill model", controlWidth: meetingControlWidth) {
                 settingsModelTextField(

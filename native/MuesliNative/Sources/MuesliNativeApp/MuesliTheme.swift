@@ -28,6 +28,13 @@ enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
         }
     }
 
+    var applicationIconFilename: String {
+        switch self {
+        case .classic: "muesli.icns"
+        case .strawberryMilk: "mimo_strawberry_app_icon.png"
+        }
+    }
+
     var previewBackground: Color {
         switch self {
         case .classic: Color(hex: 0xF0F4FA)
@@ -74,6 +81,19 @@ enum MuesliTheme {
 
     static func apply(visualTheme rawValue: String?) {
         visualTheme = MuesliVisualTheme.resolved(rawValue)
+    }
+
+    static func applicationIconImage(runtime: RuntimePaths) -> NSImage? {
+        guard let url = runtime.applicationIconURL(for: visualTheme) else { return nil }
+        return NSImage(contentsOf: url)
+    }
+
+    @MainActor
+    @discardableResult
+    static func applyApplicationIcon(to application: NSApplication, runtime: RuntimePaths) -> Bool {
+        guard let image = applicationIconImage(runtime: runtime) else { return false }
+        application.applicationIconImage = image
+        return true
     }
 
     // MARK: - Colors — Backgrounds (layered)

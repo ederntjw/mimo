@@ -44,6 +44,46 @@ struct VisualThemeTests {
         #expect(MuesliVisualTheme.classic.accentHex(afterSelecting: "8b5cf6") == "8b5cf6")
     }
 
+    @Test("Visual themes route to distinct packaged app icons")
+    func applicationIconRouting() throws {
+        let repoRoot = repositoryRoot()
+        let classicURL = repoRoot.appendingPathComponent("assets/muesli.icns")
+        let strawberryURL = repoRoot.appendingPathComponent("assets/mimo_strawberry_app_icon.png")
+        let runtime = RuntimePaths(
+            repoRoot: repoRoot,
+            menuIcon: nil,
+            appIcon: classicURL,
+            bundlePath: nil,
+            strawberryAppIcon: strawberryURL
+        )
+
+        #expect(MuesliVisualTheme.classic.applicationIconFilename == "muesli.icns")
+        #expect(MuesliVisualTheme.strawberryMilk.applicationIconFilename == "mimo_strawberry_app_icon.png")
+        #expect(runtime.applicationIconURL(for: .classic) == classicURL)
+        #expect(runtime.applicationIconURL(for: .strawberryMilk) == strawberryURL)
+
+        defer { MuesliTheme.apply(visualTheme: MuesliVisualTheme.classic.rawValue) }
+        MuesliTheme.apply(visualTheme: MuesliVisualTheme.classic.rawValue)
+        let classicImage = try #require(MuesliTheme.applicationIconImage(runtime: runtime))
+        MuesliTheme.apply(visualTheme: MuesliVisualTheme.strawberryMilk.rawValue)
+        let strawberryImage = try #require(MuesliTheme.applicationIconImage(runtime: runtime))
+
+        #expect(classicImage.tiffRepresentation != strawberryImage.tiffRepresentation)
+    }
+
+    @Test("Strawberry Milk icon is a full-resolution transparent macOS asset")
+    func strawberryApplicationIconAsset() throws {
+        let iconURL = repositoryRoot().appendingPathComponent("assets/mimo_strawberry_app_icon.png")
+        let data = try Data(contentsOf: iconURL)
+        let representation = try #require(NSBitmapImageRep(data: data))
+
+        #expect(representation.pixelsWide == 1024)
+        #expect(representation.pixelsHigh == 1024)
+        #expect(representation.hasAlpha)
+        #expect((representation.colorAt(x: 0, y: 0)?.alphaComponent ?? 1) == 0)
+        #expect((representation.colorAt(x: 512, y: 512)?.alphaComponent ?? 0) == 1)
+    }
+
     @Test("Live switching updates the rendered theme snapshot without restarting")
     func liveSwitchScreenshotRegression() throws {
         defer {
@@ -91,6 +131,12 @@ struct VisualThemeTests {
         let representation = try #require(hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds))
         hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
         return try #require(representation.representation(using: .png, properties: [:]))
+    }
+
+    private func repositoryRoot() -> URL {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { url.deleteLastPathComponent() }
+        return url
     }
 }
 

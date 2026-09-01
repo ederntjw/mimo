@@ -30,9 +30,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             let runtime = try RuntimePaths.resolve()
             AppFonts.registerIfNeeded(runtime: runtime)
-            if let appIcon = runtime.appIcon, let image = NSImage(contentsOf: appIcon) {
-                NSApplication.shared.applicationIconImage = image
-            }
             let controller = MuesliController(runtime: runtime)
             controller.applyAppThemeAppearance()
             sparkleUpdateDelegate.appState = controller.appState

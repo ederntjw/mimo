@@ -118,6 +118,9 @@ enum FloatingIndicatorPointerIntent {
 
 final class InteractiveFloatingPanel: NSPanel {
     var leftMouseDownHandler: ((NSPoint) -> Bool)?
+    var leftMouseDragPredicate: ((NSPoint) -> Bool)?
+    var windowDragBeganHandler: (() -> Void)?
+    var windowDragEndedHandler: (() -> Void)?
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -125,6 +128,12 @@ final class InteractiveFloatingPanel: NSPanel {
     override func sendEvent(_ event: NSEvent) {
         if event.type == .leftMouseDown {
             if leftMouseDownHandler?(event.locationInWindow) == true {
+                return
+            }
+            if leftMouseDragPredicate?(event.locationInWindow) == true {
+                windowDragBeganHandler?()
+                performDrag(with: event)
+                windowDragEndedHandler?()
                 return
             }
         }
@@ -1681,6 +1690,16 @@ final class FloatingIndicatorController: NSObject {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.leftMouseDownHandler = { [weak self] windowPoint in
             self?.meetingTranscriptPanel.handleClick(atWindowPoint: windowPoint) ?? false
+        }
+        panel.leftMouseDragPredicate = { [weak self] windowPoint in
+            self?.meetingTranscriptPanel.isWindowDragTarget(atWindowPoint: windowPoint) ?? false
+        }
+        panel.windowDragBeganHandler = { [weak self] in
+            self?.pointerInteractionBegan()
+        }
+        panel.windowDragEndedHandler = { [weak self] in
+            self?.savePosition()
+            self?.pointerInteractionEnded()
         }
 
         let containerView = NSView(frame: NSRect(origin: .zero, size: panel.frame.size))

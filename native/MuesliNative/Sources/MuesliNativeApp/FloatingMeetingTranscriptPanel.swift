@@ -47,7 +47,19 @@ enum FloatingMeetingTranscriptInteraction: Equatable {
         if point.x >= panelFrame.maxX - 88 {
             return .dismiss
         }
-        return .openMeeting
+        // Keep the title as the explicit route into meeting notes. The open
+        // space between it and the controls is reserved as a window drag
+        // handle, matching ordinary macOS panel behavior.
+        if point.x <= panelFrame.minX + 140 {
+            return .openMeeting
+        }
+        return nil
+    }
+
+    static func isDraggableHeader(at point: NSPoint, in panelFrame: NSRect) -> Bool {
+        guard panelFrame.contains(point),
+              point.y >= panelFrame.maxY - 42 else { return false }
+        return action(at: point, in: panelFrame) == nil
     }
 }
 
@@ -176,13 +188,10 @@ final class FloatingMeetingTranscriptPanelController {
     @discardableResult
     func handleClick(atWindowPoint windowPoint: NSPoint) -> Bool {
         guard isVisible, let hostingView else { return false }
-        let localPoint = hostingView.convert(windowPoint, from: nil)
-        let interactionPoint = hostingView.isFlipped
-            ? NSPoint(
-                x: localPoint.x,
-                y: hostingView.bounds.maxY - (localPoint.y - hostingView.bounds.minY)
-            )
-            : localPoint
+        let interactionPoint = interactionPoint(
+            atWindowPoint: windowPoint,
+            in: hostingView
+        )
         guard let interaction = FloatingMeetingTranscriptInteraction.action(
             at: interactionPoint,
             in: hostingView.bounds
@@ -197,6 +206,26 @@ final class FloatingMeetingTranscriptPanelController {
             onOpenNotes()
         }
         return true
+    }
+
+    func isWindowDragTarget(atWindowPoint windowPoint: NSPoint) -> Bool {
+        guard isVisible, let hostingView else { return false }
+        return FloatingMeetingTranscriptInteraction.isDraggableHeader(
+            at: interactionPoint(atWindowPoint: windowPoint, in: hostingView),
+            in: hostingView.bounds
+        )
+    }
+
+    private func interactionPoint(
+        atWindowPoint windowPoint: NSPoint,
+        in hostingView: NSView
+    ) -> NSPoint {
+        let localPoint = hostingView.convert(windowPoint, from: nil)
+        guard hostingView.isFlipped else { return localPoint }
+        return NSPoint(
+            x: localPoint.x,
+            y: hostingView.bounds.maxY - (localPoint.y - hostingView.bounds.minY)
+        )
     }
 
     private func copyTranscript() {
@@ -271,6 +300,12 @@ private struct FloatingMeetingTranscriptPanelView: View {
             Text("Live transcript")
                 .font(MuesliTheme.callout().weight(.semibold))
                 .foregroundStyle(MuesliTheme.textPrimary)
+                .help("Open meeting notes")
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(MuesliTheme.textTertiary)
+                .accessibilityLabel("Drag to move live transcript")
+                .help("Drag to move live transcript")
             Spacer()
             Circle()
                 .fill(model.isPaused ? MuesliTheme.textTertiary : MuesliTheme.success)

@@ -797,10 +797,11 @@ public final class MuesliController: NSObject {
             self.indicator.isToggleDictation = false
         }
         indicator.onPositionSaved = { [weak self] center in
-            self?.updateConfig {
-                $0.indicatorAnchor = .custom
-                $0.indicatorOrigin = CGPointCodable(x: center.x, y: center.y)
-            }
+            guard let self else { return }
+            self.config.indicatorAnchor = .custom
+            self.config.indicatorOrigin = CGPointCodable(x: center.x, y: center.y)
+            self.configStore.save(self.config)
+            self.appState.config = self.config
         }
         workspaceObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,

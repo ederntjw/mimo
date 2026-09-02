@@ -429,8 +429,23 @@ struct FloatingMeetingTranscriptTests {
             at: NSPoint(x: 430, y: 400), in: frame
         ) == .copy)
         #expect(FloatingMeetingTranscriptInteraction.action(
+            at: NSPoint(x: 180, y: 400), in: frame
+        ) == .openMeeting)
+        #expect(FloatingMeetingTranscriptInteraction.action(
+            at: NSPoint(x: 300, y: 400), in: frame
+        ) == nil)
+        #expect(FloatingMeetingTranscriptInteraction.isDraggableHeader(
+            at: NSPoint(x: 300, y: 400), in: frame
+        ))
+        #expect(!FloatingMeetingTranscriptInteraction.isDraggableHeader(
+            at: NSPoint(x: 430, y: 400), in: frame
+        ))
+        #expect(FloatingMeetingTranscriptInteraction.action(
             at: NSPoint(x: 250, y: 250), in: frame
         ) == nil)
+        #expect(!FloatingMeetingTranscriptInteraction.isDraggableHeader(
+            at: NSPoint(x: 250, y: 250), in: frame
+        ))
         #expect(FloatingMeetingTranscriptInteraction.action(
             at: NSPoint(x: 90, y: 250), in: frame
         ) == nil)

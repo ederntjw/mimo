@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Shared dashboard heading for surfaces that display CloudKit-backed history.
+/// Shared dashboard heading for surfaces that display account-syncable history.
 struct DashboardPageHeader: View {
     let title: String
     let appState: AppState
@@ -10,12 +10,11 @@ struct DashboardPageHeader: View {
         HStack(spacing: MuesliTheme.spacing12) {
             PageTitle(title)
 
-            DashboardICloudSyncButton(
-                isEnabled: appState.config.iCloudSyncEnabled,
-                isSyncing: appState.isICloudSyncInProgress,
-                hasError: appState.iCloudBridgeState == .error,
-                onSync: { controller.performICloudSync() },
-                onSetUp: {
+            DashboardAccountSyncButton(
+                state: appState.mimoAccountState,
+                isSyncing: appState.isMimoAccountWorking,
+                onSync: { controller.performMimoAccountSync() },
+                onOpenSettings: {
                     appState.selectedSettingsPane = .sync
                     controller.openSettingsTab()
                 }
@@ -24,46 +23,51 @@ struct DashboardPageHeader: View {
     }
 }
 
-struct DashboardICloudSyncButton: View {
-    let isEnabled: Bool
+struct DashboardAccountSyncButton: View {
+    let state: MimoAccountState
     let isSyncing: Bool
-    let hasError: Bool
     let onSync: () -> Void
-    let onSetUp: () -> Void
+    let onOpenSettings: () -> Void
 
     private var tint: Color {
-        if hasError {
-            return MuesliTheme.transcribing
-        }
-        if isEnabled {
+        switch state {
+        case .signedIn, .working:
             return MuesliTheme.accent
+        case .accountMismatch, .error:
+            return MuesliTheme.recording
+        case .notConfigured, .signedOut:
+            return MuesliTheme.textTertiary
         }
-        return MuesliTheme.textTertiary
     }
 
     private var label: String {
         if isSyncing {
-            return "Syncing with iCloud"
+            return "Syncing with your Mimo Account"
         }
-        if hasError {
-            return "Retry iCloud sync"
-        }
-        if isEnabled {
+        switch state {
+        case .signedIn:
             return "Sync now"
+        case .signedOut:
+            return "Sign in to Mimo Account sync"
+        case .notConfigured:
+            return "Mimo Account sync is not configured"
+        case .accountMismatch, .error:
+            return "Review Mimo Account sync"
+        case .working:
+            return "Syncing with your Mimo Account"
         }
-        return "Set up iCloud sync"
     }
 
     var body: some View {
         Button {
-            if isEnabled {
+            if state == .signedIn {
                 onSync()
             } else {
-                onSetUp()
+                onOpenSettings()
             }
         } label: {
             ZStack {
-                Image(systemName: hasError ? "icloud.slash" : "icloud")
+                Image(systemName: iconName)
                     .font(.system(size: 20, weight: .semibold))
 
                 RotatingSyncIcon(
@@ -72,7 +76,7 @@ struct DashboardICloudSyncButton: View {
                     font: .system(size: 8, weight: .bold)
                 )
                     .offset(y: 1)
-                    .opacity(hasError ? 0 : 1)
+                    .opacity(state == .working ? 1 : 0)
             }
             .foregroundStyle(tint)
             .frame(width: 34, height: 34)
@@ -80,7 +84,7 @@ struct DashboardICloudSyncButton: View {
             .clipShape(Circle())
             .overlay {
                 Circle()
-                    .strokeBorder(tint.opacity(isEnabled || hasError ? 0.28 : 0.14), lineWidth: 1)
+                    .strokeBorder(tint.opacity(state == .signedIn || state == .error ? 0.28 : 0.14), lineWidth: 1)
             }
             .contentShape(Circle())
         }
@@ -88,7 +92,20 @@ struct DashboardICloudSyncButton: View {
         .disabled(isSyncing)
         .help(label)
         .accessibilityLabel(label)
-        .accessibilityHint("Sync text with your iPhone or iPad through private iCloud.")
+        .accessibilityHint("Sync text across devices through your private Mimo Account.")
+    }
+
+    private var iconName: String {
+        switch state {
+        case .signedIn:
+            return "person.crop.circle.badge.checkmark"
+        case .working:
+            return "person.crop.circle"
+        case .accountMismatch, .error:
+            return "person.crop.circle.badge.exclamationmark"
+        case .notConfigured, .signedOut:
+            return "person.crop.circle"
+        }
     }
 }
 

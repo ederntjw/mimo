@@ -30,6 +30,7 @@ case "${shard}" in
       IndicatorFrameSizeTests
       WindowAppearanceTests
       VisualThemeTests
+      MimoAccountSyncTests
       OpenAILogoShapeTests
       StandardMenuShortcutTests
       MeetingChunkCollectorTests
@@ -70,6 +71,8 @@ case "${shard}" in
       DiarizerPreloadCoordinationTests
       PasteControllerTests
       QuilTransformationTests
+      BundledCleanupModelTests
+      TextCaretIndicatorPlacementTests
       BackendOptionTests
       OpenAIDictationProviderTests
       OpenRouterTranscriptionClientTests
@@ -99,6 +102,7 @@ case "${shard}" in
       MeetingFollowUpThreadTests
       MeetingFollowUpSummaryPromptTests
       LiveMeetingAssistantTests
+      LiveSessionKindTests
       MeetingSummaryClientTests
       MeetingsNavigationTests
       MeetingBrowserLogicTests

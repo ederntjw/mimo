@@ -553,6 +553,12 @@ public final class MuesliController: NSObject {
     private var bridgeDiscoveryFollowUpPending = false
     private var bridgeCompanionDiscoveryTask: Task<Void, Never>?
     private var bridgeCompanionDiscoveryActivity: NSObjectProtocol?
+    private let mimoAccountAPI: any MimoAccountAPIProtocol
+    private let mimoAccountSyncEngine: MimoAccountSyncEngine
+    private var mimoAccountSyncTask: Task<Void, Never>?
+    private var mimoAccountSyncDebounceTask: Task<Void, Never>?
+    private var mimoAccountSyncGeneration = 0
+    private var mimoAccountSyncPending = false
     private var hasStarted = false
 
     init(
@@ -565,7 +571,8 @@ public final class MuesliController: NSObject {
         audioDuckingController: AudioDuckingManaging = AudioDuckingController(),
         dictationAudioRoutingController: DictationAudioRouting = DictationAudioRouteController(),
         openRouterAuth: OpenRouterAuthManager? = nil,
-        openRouterModelCatalogClient: OpenRouterModelCatalogClient = OpenRouterModelCatalogClient()
+        openRouterModelCatalogClient: OpenRouterModelCatalogClient = OpenRouterModelCatalogClient(),
+        mimoAccountAPI: (any MimoAccountAPIProtocol)? = nil
     ) {
         self.configStore = configStore
         self.openRouterAuth = openRouterAuth ?? .shared
@@ -591,8 +598,17 @@ public final class MuesliController: NSObject {
             configStore.save(loadedConfig)
         }
         self.runtime = runtime
-        self.dictationStore = dictationStore ?? DictationStore(
+        let resolvedDictationStore = dictationStore ?? DictationStore(
             databaseURL: MuesliPaths.defaultDatabaseURL(appName: AppIdentity.supportDirectoryName)
+        )
+        self.dictationStore = resolvedDictationStore
+        let resolvedMimoAccountAPI = mimoAccountAPI ?? MimoAccountAPI.shared
+        self.mimoAccountAPI = resolvedMimoAccountAPI
+        let deviceSnapshot = MuesliBridgeDeviceIdentity.local()
+        self.mimoAccountSyncEngine = MimoAccountSyncEngine(
+            store: resolvedDictationStore,
+            api: resolvedMimoAccountAPI,
+            deviceID: UUID(uuidString: deviceSnapshot.deviceID) ?? UUID()
         )
         self.meetingHookDispatcher = meetingHookDispatcher
         self.meetingMarkdownAutoExporter = meetingMarkdownAutoExporter
@@ -666,6 +682,7 @@ public final class MuesliController: NSObject {
         } catch {
             fputs("[muesli-native] startup error: \(error)\n", stderr)
         }
+        restoreMimoAccountSession()
         recoverStaleLiveMeetings()
         normalizeMeetingTranscriptionSelectionForAvailability()
         SoundController.prewarmLifecycleSounds()
@@ -965,6 +982,11 @@ public final class MuesliController: NSObject {
             self.iCloudWakeObserver = nil
         }
         cancelActiveICloudSyncTask()
+        mimoAccountSyncGeneration += 1
+        mimoAccountSyncTask?.cancel()
+        mimoAccountSyncTask = nil
+        mimoAccountSyncDebounceTask?.cancel()
+        mimoAccountSyncDebounceTask = nil
         iCloudSyncDebounceTask?.cancel()
         iCloudSyncDebounceTask = nil
         iCloudSubscriptionGeneration &+= 1
@@ -1866,7 +1888,8 @@ public final class MuesliController: NSObject {
                     transcript: transcript,
                     meetingTitle: meetingTitle,
                     previousDigest: previousDigest.isEmpty ? nil : previousDigest,
-                    config: self.config
+                    config: self.config,
+                    sessionKind: self.liveSessionKind(meetingID: ownerID)
                 )
                 guard self.liveMeetingSummaryRequestID == requestID,
                       self.isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) else {
@@ -1931,7 +1954,8 @@ public final class MuesliController: NSObject {
                     normalizedQuestion,
                     transcript: transcript,
                     meetingTitle: title,
-                    config: self.config
+                    config: self.config,
+                    sessionKind: self.liveSessionKind(meetingID: meetingID)
                 )
                 guard self.liveMeetingAssistantRequestID == requestID,
                       self.isCurrentLiveMeetingTranscriptSession(ownerID: meetingID, generation: generation) else {
@@ -1961,6 +1985,10 @@ public final class MuesliController: NSObject {
             self.liveMeetingAssistantRequestID = nil
             self.appState.isLiveMeetingAssistantAnswering = false
         }
+    }
+
+    private func liveSessionKind(meetingID: Int64) -> MeetingSummaryClient.LiveSessionKind {
+        meeting(id: meetingID)?.source == .lecture ? .lecture : .meeting
     }
 
     private func refreshContributionMilestonePrompt(totalWords: Int, totalMeetings: Int) {
@@ -2123,6 +2151,252 @@ public final class MuesliController: NSObject {
             NSWorkspace.shared.open(ContributionSocialShare.linkedInURL(wordCount: wordCount))
         case .githubStar, .buyMeCoffee:
             assertionFailure("Support contribution actions should open through supportURL.")
+        }
+    }
+
+    func restoreMimoAccountSession() {
+        Task { [weak self] in
+            guard let self else { return }
+            let configured = await self.mimoAccountAPI.isConfigured
+            guard configured else {
+                self.appState.mimoAccountState = .notConfigured
+                self.appState.mimoAccountStatus = "Add the Mimo Supabase project configuration to enable account sync."
+                return
+            }
+            do {
+                guard let session = try await self.mimoAccountAPI.storedSession() else {
+                    self.appState.mimoAccountState = .signedOut
+                    self.appState.mimoAccountStatus = nil
+                    return
+                }
+                try await self.activateMimoAccountSession(session)
+            } catch {
+                self.presentMimoAccountFailure(error)
+            }
+        }
+    }
+
+    func createMimoAccount(email: String, password: String, displayName: String) {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedEmail.isEmpty, password.count >= 8 else {
+            appState.mimoAccountState = .error
+            appState.mimoAccountStatus = "Enter an email address and a password with at least 8 characters."
+            return
+        }
+        beginMimoAccountOperation()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await self.mimoAccountAPI.signUp(
+                    email: normalizedEmail,
+                    password: password,
+                    displayName: displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+                guard let session = result.session else {
+                    self.finishMimoAccountOperation()
+                    self.appState.mimoAccountState = .signedOut
+                    self.appState.mimoAccountStatus = "Check \(result.user.email ?? normalizedEmail) to confirm your account, then sign in."
+                    return
+                }
+                try await self.activateMimoAccountSession(session)
+                self.appState.mimoAccountStatus = "Your Mimo account is ready."
+            } catch {
+                self.finishMimoAccountOperation()
+                self.presentMimoAccountFailure(error)
+            }
+        }
+    }
+
+    func signInToMimoAccount(email: String, password: String) {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedEmail.isEmpty, !password.isEmpty else {
+            appState.mimoAccountState = .error
+            appState.mimoAccountStatus = "Enter your Mimo account email and password."
+            return
+        }
+        beginMimoAccountOperation()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let session = try await self.mimoAccountAPI.signIn(
+                    email: normalizedEmail,
+                    password: password
+                )
+                try await self.activateMimoAccountSession(session)
+                self.appState.mimoAccountStatus = "Signed in. Your text history can now sync across devices."
+            } catch {
+                self.finishMimoAccountOperation()
+                self.presentMimoAccountFailure(error)
+            }
+        }
+    }
+
+    func signOutOfMimoAccount() {
+        cancelMimoAccountSync()
+        beginMimoAccountOperation()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.mimoAccountAPI.signOut()
+            self.finishMimoAccountOperation()
+            self.appState.mimoAccountEmail = nil
+            self.appState.mimoAccountState = .signedOut
+            self.appState.mimoAccountStatus = "Signed out. Local history and audio remain on this Mac."
+        }
+    }
+
+    func deleteMimoAccount() {
+        cancelMimoAccountSync()
+        beginMimoAccountOperation()
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.mimoAccountAPI.deleteAccount()
+                self.finishMimoAccountOperation()
+                self.appState.mimoAccountEmail = nil
+                self.appState.mimoAccountState = .signedOut
+                self.appState.mimoAccountStatus = "Your Mimo account and server data were deleted. Local data remains on this Mac."
+            } catch {
+                self.finishMimoAccountOperation()
+                self.presentMimoAccountFailure(error)
+            }
+        }
+    }
+
+    func performMimoAccountSync() {
+        scheduleMimoAccountSync(delay: 0, userInitiated: true)
+    }
+
+    private func activateMimoAccountSession(_ session: MimoAccountSession) async throws {
+        guard try dictationStore.claimCloudSyncAccountScope(
+            session.user.id.uuidString.lowercased(),
+            forKey: MimoAccountSyncEngine.accountScopeKey
+        ) else {
+            await mimoAccountAPI.signOut()
+            throw MimoAccountError.accountMismatch
+        }
+        finishMimoAccountOperation()
+        appState.mimoAccountEmail = session.user.email
+        appState.mimoAccountState = .signedIn
+        if config.iCloudSyncEnabled {
+            updateConfig(iCloudDisableCompletionStatus: "Legacy iCloud sync is off while Mimo Account sync is active.") {
+                $0.iCloudSyncEnabled = false
+            }
+        }
+        scheduleMimoAccountSync(delay: 0.1)
+    }
+
+    private func beginMimoAccountOperation() {
+        appState.isMimoAccountWorking = true
+        appState.mimoAccountState = .working
+        appState.mimoAccountStatus = nil
+    }
+
+    private func finishMimoAccountOperation() {
+        appState.isMimoAccountWorking = false
+    }
+
+    private func scheduleMimoAccountSync(
+        delay: TimeInterval,
+        userInitiated: Bool = false
+    ) {
+        guard appState.mimoAccountEmail != nil,
+              appState.mimoAccountState == .signedIn
+                || appState.mimoAccountState == .error else { return }
+        if mimoAccountSyncTask != nil {
+            mimoAccountSyncPending = true
+            return
+        }
+        mimoAccountSyncDebounceTask?.cancel()
+        mimoAccountSyncDebounceTask = Task { [weak self] in
+            guard let self else { return }
+            if delay > 0 {
+                do {
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            self.mimoAccountSyncDebounceTask = nil
+            self.startMimoAccountSync(userInitiated: userInitiated)
+        }
+    }
+
+    private func startMimoAccountSync(userInitiated: Bool) {
+        guard mimoAccountSyncTask == nil else {
+            mimoAccountSyncPending = true
+            return
+        }
+        mimoAccountSyncGeneration += 1
+        let generation = mimoAccountSyncGeneration
+        appState.isMimoAccountWorking = true
+        appState.mimoAccountState = .working
+        appState.mimoAccountStatus = "Syncing text with your Mimo account…"
+        mimoAccountSyncTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let result = try await self.mimoAccountSyncEngine.sync()
+                guard self.mimoAccountSyncGeneration == generation else { return }
+                self.mimoAccountSyncTask = nil
+                self.appState.isMimoAccountWorking = false
+                self.appState.mimoAccountState = .signedIn
+                self.appState.mimoAccountLastSyncedAt = Date()
+                self.appState.mimoAccountLastSyncSummary = "\(result.uploaded) up, \(result.downloaded) down"
+                self.appState.mimoAccountStatus = (result.uploaded + result.downloaded) == 0
+                    ? "All text is up to date."
+                    : "Synced \(result.uploaded) upload\(result.uploaded == 1 ? "" : "s") and \(result.downloaded) download\(result.downloaded == 1 ? "" : "s")."
+                self.syncAppState()
+                self.finishPendingMimoAccountSync()
+            } catch is CancellationError {
+                guard self.mimoAccountSyncGeneration == generation else { return }
+                self.mimoAccountSyncTask = nil
+                self.appState.isMimoAccountWorking = false
+                self.finishPendingMimoAccountSync()
+            } catch {
+                guard self.mimoAccountSyncGeneration == generation else { return }
+                self.mimoAccountSyncTask = nil
+                self.appState.isMimoAccountWorking = false
+                self.presentMimoAccountFailure(error)
+                if userInitiated {
+                    TelemetryDeck.signal("mimo_account_sync_failed", parameters: [
+                        "platform": "macos",
+                        "reason": String(describing: type(of: error)),
+                    ])
+                }
+                self.finishPendingMimoAccountSync()
+            }
+        }
+    }
+
+    private func finishPendingMimoAccountSync() {
+        guard mimoAccountSyncPending else { return }
+        mimoAccountSyncPending = false
+        scheduleMimoAccountSync(delay: 0.2)
+    }
+
+    private func cancelMimoAccountSync() {
+        mimoAccountSyncGeneration += 1
+        mimoAccountSyncTask?.cancel()
+        mimoAccountSyncTask = nil
+        mimoAccountSyncDebounceTask?.cancel()
+        mimoAccountSyncDebounceTask = nil
+        mimoAccountSyncPending = false
+        appState.isMimoAccountWorking = false
+    }
+
+    private func presentMimoAccountFailure(_ error: Error) {
+        appState.mimoAccountStatus = error.localizedDescription
+        switch error {
+        case MimoAccountError.notConfigured:
+            appState.mimoAccountState = .notConfigured
+        case MimoAccountError.signedOut:
+            appState.mimoAccountEmail = nil
+            appState.mimoAccountState = .signedOut
+        case MimoAccountError.accountMismatch:
+            appState.mimoAccountEmail = nil
+            appState.mimoAccountState = .accountMismatch
+        default:
+            appState.mimoAccountState = .error
         }
     }
 
@@ -2424,6 +2698,7 @@ public final class MuesliController: NSObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
+                self?.scheduleMimoAccountSync(delay: 0.5)
                 self?.scheduleICloudSync(
                     intent: .incoming,
                     delay: 0.5,
@@ -2438,6 +2713,7 @@ public final class MuesliController: NSObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
+                self?.scheduleMimoAccountSync(delay: 0.5)
                 self?.scheduleICloudSync(
                     intent: .incoming,
                     delay: 0.5,
@@ -2493,6 +2769,7 @@ public final class MuesliController: NSObject {
             }
             return
         }
+        scheduleMimoAccountSync(delay: 0.35)
         scheduleICloudSync(intent: .outgoing, delay: 0, userInitiated: false)
     }
 
@@ -6440,6 +6717,25 @@ public final class MuesliController: NSObject {
     }
 
     @discardableResult
+    func startLiveLectureFromMeetingsView(title: String = "Live Lecture") -> Bool {
+        guard normalizeLiveMeetingTranscriptionSelectionForAvailability() != nil else {
+            presentErrorAlert(
+                title: "Live Lecture needs a local transcriber",
+                message: "Download a Parakeet model in Models, or use Apple Speech on a supported Mac, then try again."
+            )
+            return false
+        }
+        return startMeetingRecordingFromEntryPoint(
+            title: title,
+            presentation: .foregroundNotes,
+            startOrigin: .manual,
+            dashboardWindowPresentation: .restored,
+            source: .lecture,
+            templateOverride: MeetingTemplates.lecture.snapshot
+        )
+    }
+
+    @discardableResult
     func startMeetingRecordingFromEntryPoint(
         title: String = "Meeting",
         calendarEventID: String? = nil,
@@ -6448,7 +6744,9 @@ public final class MuesliController: NSObject {
         autoStopSource: MeetingAutoStopSource? = nil,
         presentation: MeetingStartPresentation = .foregroundNotes,
         startOrigin: MeetingRecordingStartOrigin = .manual,
-        dashboardWindowPresentation: DashboardWindowPresentation = .restored
+        dashboardWindowPresentation: DashboardWindowPresentation = .restored,
+        source: MeetingSource = .meeting,
+        templateOverride: MeetingTemplateSnapshot? = nil
     ) -> Bool {
         guard ensureBasicDictationPermissionsBeforeDashboard() else { return false }
         if isMeetingRecording() {
@@ -6468,7 +6766,9 @@ public final class MuesliController: NSObject {
             openDocument: presentation.opensMeetingDocument,
             endDate: endDate,
             autoStopSource: autoStopSource,
-            startOrigin: startOrigin
+            startOrigin: startOrigin,
+            source: source,
+            templateOverride: templateOverride
         )
         guard didStart else { return false }
         if presentation.presentsHistoryWindow {
@@ -6491,7 +6791,9 @@ public final class MuesliController: NSObject {
         startOrigin: MeetingRecordingStartOrigin = .manual,
         followUpToID: Int64? = nil,
         inheritedFolderID: Int64? = nil,
-        previousMeetingNotes: String? = nil
+        previousMeetingNotes: String? = nil,
+        source: MeetingSource = .meeting,
+        templateOverride: MeetingTemplateSnapshot? = nil
     ) -> Bool {
         guard !isMeetingRecording(), !isStartingMeetingRecording else { return false }
         guard let meetingBackend = normalizeMeetingTranscriptionSelectionForAvailability() else {
@@ -6501,7 +6803,7 @@ public final class MuesliController: NSObject {
             )
             return false
         }
-        let templateSnapshot = defaultMeetingTemplate()
+        let templateSnapshot = templateOverride ?? defaultMeetingTemplate()
         let resolvedCalendarEventID = calendarOccurrence?.eventID ?? calendarEventID
         let meetingID: Int64
         do {
@@ -6513,6 +6815,7 @@ public final class MuesliController: NSObject {
                 selectedTemplateName: templateSnapshot.name,
                 selectedTemplateKind: templateSnapshot.kind,
                 selectedTemplatePrompt: templateSnapshot.prompt,
+                source: source,
                 folderID: inheritedFolderID,
                 followUpToID: followUpToID,
                 calendarOccurrence: calendarOccurrence
@@ -7388,7 +7691,13 @@ public final class MuesliController: NSObject {
             alert.addButton(withTitle: "Cancel")
             alert.buttons.first?.hasDestructiveAction = true
         }
-        presentDiscardMeetingAlert(alert, manualNotesCheckbox: manualNotesCheckbox)
+        // A SwiftUI button action can run while AppKit is still inside the
+        // hosting view's constraint-update cycle. Beginning a sheet in that
+        // same stack is an AppKit consistency exception on macOS 26. Defer one
+        // main-loop turn so the view update commits before attaching NSAlert.
+        DispatchQueue.main.async { [weak self, alert] in
+            self?.presentDiscardMeetingAlert(alert, manualNotesCheckbox: manualNotesCheckbox)
+        }
     }
 
     private static func makeDiscardMeetingAccessoryView() -> MeetingDiscardAccessory {

@@ -1,7 +1,112 @@
 import AppKit
+import ApplicationServices
 import QuartzCore
 import Foundation
 import MuesliCore
+
+enum TextCaretIndicatorPlacement {
+    static let gap: CGFloat = 8
+
+    static func appKitRect(fromAccessibility rect: CGRect, primaryScreenTop: CGFloat) -> CGRect {
+        CGRect(
+            x: rect.minX,
+            y: primaryScreenTop - rect.maxY,
+            width: rect.width,
+            height: rect.height
+        )
+    }
+
+    static func frame(
+        beside caretFrame: CGRect,
+        size: CGSize,
+        visibleFrames: [CGRect],
+        fallback: CGRect,
+        gap: CGFloat = gap
+    ) -> CGRect {
+        let caretPoint = CGPoint(x: caretFrame.midX, y: caretFrame.midY)
+        let visibleFrame = visibleFrames.first(where: { $0.contains(caretPoint) }) ?? fallback
+        var x = caretFrame.maxX + gap
+        if x + size.width > visibleFrame.maxX {
+            x = caretFrame.minX - gap - size.width
+        }
+        x = min(max(x, visibleFrame.minX), visibleFrame.maxX - size.width)
+        let proposedY = caretFrame.midY - size.height / 2
+        let y = min(max(proposedY, visibleFrame.minY), visibleFrame.maxY - size.height)
+        return CGRect(origin: CGPoint(x: x, y: y), size: size)
+    }
+}
+
+private enum AccessibilityTextCaretLocator {
+    static func currentCaretFrame(screens: [NSScreen] = NSScreen.screens) -> CGRect? {
+        guard let primaryScreenTop = screens.first?.frame.maxY else { return nil }
+        let system = AXUIElementCreateSystemWide()
+        var focusedValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            system,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedValue
+        ) == .success,
+        let focusedValue,
+        CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else { return nil }
+        let focused = focusedValue as! AXUIElement
+
+        var rangeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            focused,
+            kAXSelectedTextRangeAttribute as CFString,
+            &rangeValue
+        ) == .success,
+        let rangeValue,
+        CFGetTypeID(rangeValue) == AXValueGetTypeID() else { return nil }
+        var range = CFRange(location: 0, length: 0)
+        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return nil }
+
+        var caretRange = CFRange(location: max(0, range.location + range.length), length: 0)
+        let caretRangeValue = AXValueCreate(.cfRange, &caretRange)
+        var boundsValue: CFTypeRef?
+        var result = caretRangeValue.map {
+            AXUIElementCopyParameterizedAttributeValue(
+                focused,
+                kAXBoundsForRangeParameterizedAttribute as CFString,
+                $0,
+                &boundsValue
+            )
+        } ?? .failure
+
+        // A few editors reject a zero-length range. Their preceding character
+        // still gives us the correct text-line bounds and a stable trailing edge.
+        if result != .success, caretRange.location > 0 {
+            var precedingRange = CFRange(location: caretRange.location - 1, length: 1)
+            if let precedingValue = AXValueCreate(.cfRange, &precedingRange) {
+                result = AXUIElementCopyParameterizedAttributeValue(
+                    focused,
+                    kAXBoundsForRangeParameterizedAttribute as CFString,
+                    precedingValue,
+                    &boundsValue
+                )
+            }
+        }
+
+        guard result == .success,
+              let boundsValue,
+              CFGetTypeID(boundsValue) == AXValueGetTypeID() else { return nil }
+        var accessibilityRect = CGRect.zero
+        guard AXValueGetValue(boundsValue as! AXValue, .cgRect, &accessibilityRect),
+              accessibilityRect.isFinite,
+              accessibilityRect.width < 10_000,
+              accessibilityRect.height < 10_000 else { return nil }
+        return TextCaretIndicatorPlacement.appKitRect(
+            fromAccessibility: accessibilityRect,
+            primaryScreenTop: primaryScreenTop
+        )
+    }
+}
+
+private extension CGRect {
+    var isFinite: Bool {
+        [minX, minY, width, height].allSatisfy(\.isFinite)
+    }
+}
 
 enum FloatingIndicatorPointerIntent {
     static let dragThreshold: CGFloat = 4
@@ -84,7 +189,8 @@ private final class HoverIndicatorView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let window,
+        guard owner?.allowsManualDrag == true,
+              let window,
               let mouseDownScreenLocation,
               let windowOriginAtMouseDown else { return }
         let currentScreenLocation = NSEvent.mouseLocation
@@ -199,6 +305,8 @@ final class FloatingIndicatorController: NSObject {
     private var quillIconView: NSImageView?
     private var barLayers: [CALayer] = []
     private var amplitudeTimer: Timer?
+    private var caretTrackingTimer: Timer?
+    private var activeTextCaretFrame: CGRect?
     private var smoothedAmplitude: CGFloat = 0
     private var waveformAnimationMode: WaveformAnimationMode = .level
     private var recordingWaveformMode: WaveformAnimationMode = .level
@@ -235,6 +343,10 @@ final class FloatingIndicatorController: NSObject {
 
     var currentFrame: NSRect? {
         indicatorScreenFrame
+    }
+
+    fileprivate var allowsManualDrag: Bool {
+        state == .idle || isMeetingRecording
     }
 
     func pointerDragBegan() {
@@ -487,6 +599,7 @@ final class FloatingIndicatorController: NSObject {
             exitComputerUseCursorMode(restoreFrame: false)
         }
         self.state = state
+        updateCaretTracking(for: state)
         if state != .idle {
             hideShortcutPillChrome()
         }
@@ -973,6 +1086,7 @@ final class FloatingIndicatorController: NSObject {
 
     func close() {
         stopWaveformAnimation()
+        stopCaretTracking()
         hoverExitWorkItem?.cancel()
         hoverExitWorkItem = nil
         preservesCollapsedLeftEdge = false
@@ -1917,6 +2031,15 @@ final class FloatingIndicatorController: NSObject {
             }
         }
 
+        if shouldFollowTextCaret(for: state), let activeTextCaretFrame {
+            return TextCaretIndicatorPlacement.frame(
+                beside: activeTextCaretFrame,
+                size: size,
+                visibleFrames: NSScreen.screens.map(\.visibleFrame),
+                fallback: mainVisibleFrame
+            )
+        }
+
         // Idle hover expansion uses the saved collapsed position as its anchor,
         // so the left edge stays fixed instead of resizing around the midpoint.
         // The expanded pill remains draggable; savePosition converts its frame
@@ -1961,6 +2084,46 @@ final class FloatingIndicatorController: NSObject {
         let x = min(max(center.x - size.width / 2, screen.minX), screen.maxX - size.width)
         let y = min(max(center.y - size.height / 2, screen.minY), screen.maxY - size.height)
         return NSRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    private func shouldFollowTextCaret(for state: DictationState) -> Bool {
+        state != .idle && !isMeetingRecording && !isComputerUseCursorMode
+    }
+
+    private func updateCaretTracking(for state: DictationState) {
+        guard shouldFollowTextCaret(for: state) else {
+            stopCaretTracking()
+            return
+        }
+        if let frame = AccessibilityTextCaretLocator.currentCaretFrame() {
+            activeTextCaretFrame = frame
+        }
+        guard caretTrackingTimer == nil else { return }
+        let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.refreshCaretAnchoredFrame()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        caretTrackingTimer = timer
+    }
+
+    private func refreshCaretAnchoredFrame() {
+        guard shouldFollowTextCaret(for: state), !isDragging,
+              let frame = AccessibilityTextCaretLocator.currentCaretFrame() else { return }
+        activeTextCaretFrame = frame
+        guard let panel, let config = lastLoadedConfig else { return }
+        let targetFrame = frameForState(state, config: config)
+        guard panel.frame != targetFrame else { return }
+        panel.setFrame(targetFrame, display: true)
+        containerView?.frame = NSRect(origin: .zero, size: targetFrame.size)
+        contentView?.frame = NSRect(origin: .zero, size: targetFrame.size)
+    }
+
+    private func stopCaretTracking() {
+        caretTrackingTimer?.invalidate()
+        caretTrackingTimer = nil
+        activeTextCaretFrame = nil
     }
 
 

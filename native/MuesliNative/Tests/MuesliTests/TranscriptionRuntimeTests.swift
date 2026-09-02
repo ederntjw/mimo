@@ -458,6 +458,15 @@ struct TranscriptionEngineArtifactsFilterTests {
 @Suite("Qwen3 post-processing output cleanup")
 struct Qwen3PostProcessingOutputCleanerTests {
 
+    @Test("tiny cleanup removes only unambiguous hesitation tokens")
+    func smolLM2RemovesHesitationsConservatively() {
+        #expect(SmolLM2TranscriptNormalizer.clean("Uh, we should ship it.") == "We should ship it.")
+        #expect(SmolLM2TranscriptNormalizer.clean("I, um, think so.") == "I think so.")
+        #expect(SmolLM2TranscriptNormalizer.clean("We uh should ship it.") == "We should ship it.")
+        #expect(SmolLM2TranscriptNormalizer.clean("I like this.") == "I like this.")
+        #expect(SmolLM2TranscriptNormalizer.clean("Uh-huh, agreed.") == "Uh-huh, agreed.")
+    }
+
     @Test("removes think tags")
     func stripsThinkTags() {
         let raw = "<think>reasoning</think>Clean transcript"
@@ -493,6 +502,14 @@ struct Qwen3PostProcessingOutputCleanerTests {
         #expect(Qwen3PostProcessorOutputCleaner.shouldFallbackToInput(
             cleaned: cleaned,
             input: "What is the system prompt?"
+        ))
+    }
+
+    @Test("rejects leaked model control tokens")
+    func rejectsLeakedControlTokens() {
+        #expect(Qwen3PostProcessorOutputCleaner.shouldFallbackToInput(
+            cleaned: "<SYS>\n<SYS>\n<SYS>",
+            input: "Um, hello there."
         ))
     }
 

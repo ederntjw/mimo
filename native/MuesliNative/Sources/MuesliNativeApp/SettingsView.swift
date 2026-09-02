@@ -218,8 +218,24 @@ struct SettingsView: View {
     @State private var isShowingICloudSyncReconnectConfirmation = false
     @State private var isShowingICloudSyncResetConfirmation = false
     @State private var isShowingIPhoneBridgeQRCode = false
+    @State private var mimoAccountEmail = ""
+    @State private var mimoAccountPassword = ""
+    @State private var mimoAccountDisplayName = ""
+    @State private var isCreatingMimoAccount = false
+    @State private var isShowingMimoAccountDeletionConfirmation = false
     @State private var openAIDictationAPIKey: String = ""
     @State private var openAITestState: OpenAIConnectionTestState = .idle
+
+    private var pendingDataDestructionBinding: Binding<Bool> {
+        Binding(
+            get: { pendingDataDestruction != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingDataDestruction = nil
+                }
+            }
+        )
+    }
 
     init(appState: AppState, controller: MuesliController) {
         self.appState = appState
@@ -452,83 +468,93 @@ struct SettingsView: View {
 
     var body: some View {
         ScrollViewReader { scrollProxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
-                    Text("Settings")
-                        .font(MuesliTheme.title1())
-                        .foregroundStyle(MuesliTheme.textPrimary)
+            settingsPresentationView(scrollProxy: scrollProxy)
+        }
+    }
 
-                    settingsPanePicker
-                    paneContent
-                }
-                .padding(.horizontal, MuesliTheme.spacing32)
+    private var settingsScrollView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
+                Text("Settings")
+                    .font(MuesliTheme.title1())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+
+                settingsPanePicker
+                paneContent
+            }
+            .padding(.horizontal, MuesliTheme.spacing32)
             .padding(.top, MuesliTheme.pageTop)
             .padding(.bottom, MuesliTheme.spacing32)
+        }
+        .background(MuesliTheme.backgroundBase)
+    }
+
+    private func settingsLifecycleView(scrollProxy: ScrollViewProxy) -> some View {
+        settingsScrollView
+        .onAppear {
+            refreshDownloadedModelOptions()
+            refreshAudioInputDevices()
+            startPermissionPolling()
+            if appState.selectedMeetingSummaryBackend == .openRouter {
+                loadOpenRouterFreeModelsIfNeeded()
             }
-            .background(MuesliTheme.backgroundBase)
-            .onAppear {
+            if appState.dictationProvider == .openRouter,
+               controller.hostedDictationModelVisibility.shows(.openRouter) {
+                loadOpenRouterTranscriptionModelsIfNeeded()
+            }
+            scrollToFeatureTourTarget(activeFeatureTourTarget, using: scrollProxy)
+        }
+        .onDisappear {
+            SoundController.stopMaraudersMapClip()
+            isPreviewingClip = false
+            audioInputDeviceRefreshTask?.cancel()
+            audioInputDeviceRefreshTask = nil
+            stopPermissionPolling()
+        }
+        .onChange(of: appState.selectedTab) { _, tab in
+            if tab == .settings {
+                selectedPane = appState.selectedSettingsPane
                 refreshDownloadedModelOptions()
                 refreshAudioInputDevices()
-                startPermissionPolling()
-                if appState.selectedMeetingSummaryBackend == .openRouter {
-                    loadOpenRouterFreeModelsIfNeeded()
-                }
-                if appState.dictationProvider == .openRouter,
-                   controller.hostedDictationModelVisibility.shows(.openRouter) {
-                    loadOpenRouterTranscriptionModelsIfNeeded()
-                }
-                scrollToFeatureTourTarget(activeFeatureTourTarget, using: scrollProxy)
+                refreshPermissionStatuses(for: .settingsSelected)
             }
-            .onDisappear {
-                SoundController.stopMaraudersMapClip()
-                isPreviewingClip = false
-                audioInputDeviceRefreshTask?.cancel()
-                audioInputDeviceRefreshTask = nil
-                stopPermissionPolling()
+        }
+        .onChange(of: appState.selectedSettingsPane) { _, pane in
+            selectedPane = pane
+        }
+        .onChange(of: selectedPane) { _, pane in
+            appState.selectedSettingsPane = pane
+            if pane == .dictation || pane == .meetings {
+                loadCachedAudioInputDevices()
             }
-            .onChange(of: appState.selectedTab) { _, tab in
-                if tab == .settings {
-                    selectedPane = appState.selectedSettingsPane
-                    refreshDownloadedModelOptions()
-                    refreshAudioInputDevices()
-                    refreshPermissionStatuses(for: .settingsSelected)
-                }
+            scrollToFeatureTourTarget(activeFeatureTourTarget, using: scrollProxy)
+        }
+        .onChange(of: activeFeatureTourTarget) { _, target in
+            scrollToFeatureTourTarget(target, using: scrollProxy)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            guard appState.selectedTab == .settings else { return }
+            refreshAudioInputDevices()
+            refreshPermissionStatuses(for: .appActivated)
+        }
+        .onChange(of: appState.selectedBackend) { _, _ in
+            refreshDownloadedModelOptions()
+        }
+        .onChange(of: appState.selectedMeetingTranscriptionBackend) { _, _ in
+            refreshDownloadedModelOptions()
+        }
+        .onChange(of: appState.selectedMeetingSummaryBackend) { _, backend in
+            if backend == .openRouter {
+                loadOpenRouterFreeModelsIfNeeded()
             }
-            .onChange(of: appState.selectedSettingsPane) { _, pane in
-                selectedPane = pane
-            }
-            .onChange(of: selectedPane) { _, pane in
-                appState.selectedSettingsPane = pane
-                if pane == .dictation || pane == .meetings {
-                    loadCachedAudioInputDevices()
-                }
-                scrollToFeatureTourTarget(activeFeatureTourTarget, using: scrollProxy)
-            }
-            .onChange(of: activeFeatureTourTarget) { _, target in
-                scrollToFeatureTourTarget(target, using: scrollProxy)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-                guard appState.selectedTab == .settings else { return }
-                refreshAudioInputDevices()
-                refreshPermissionStatuses(for: .appActivated)
-            }
-            .onChange(of: appState.selectedBackend) { _, _ in
-                refreshDownloadedModelOptions()
-            }
-            .onChange(of: appState.selectedMeetingTranscriptionBackend) { _, _ in
-                refreshDownloadedModelOptions()
-            }
-            .onChange(of: appState.selectedMeetingSummaryBackend) { _, backend in
-                if backend == .openRouter {
-                    loadOpenRouterFreeModelsIfNeeded()
-                }
-            }
+        }
+    }
+
+    private func settingsPresentationView(scrollProxy: ScrollViewProxy) -> some View {
+        settingsLifecycleView(scrollProxy: scrollProxy)
             .alert(
                 pendingDataDestruction?.title ?? "Confirm Destructive Action",
-                isPresented: Binding(
-                    get: { pendingDataDestruction != nil },
-                    set: { if !$0 { pendingDataDestruction = nil } }
-                )
+                isPresented: pendingDataDestructionBinding
             ) {
                 Button("Cancel", role: .cancel) {
                     pendingDataDestruction = nil
@@ -576,6 +602,14 @@ struct SettingsView: View {
             } message: {
                 Text("Clear this Mac's sync connection and set it up again. Local history, audio, and CloudKit data won't be deleted.")
             }
+            .alert("Delete your Mimo account?", isPresented: $isShowingMimoAccountDeletionConfirmation) {
+                Button("Cancel", role: .cancel) {}
+                Button("Delete Account", role: .destructive) {
+                    controller.deleteMimoAccount()
+                }
+            } message: {
+                Text("This permanently deletes your Mimo account and synced server data. Local history and audio on this Mac remain unless you clear them separately.")
+            }
             .sheet(isPresented: $isShowingIPhoneBridgeQRCode, onDismiss: {
                 controller.cancelIPhoneBridgeDeviceDiscovery()
             }) {
@@ -597,7 +631,6 @@ struct SettingsView: View {
                     onClose: { isCleanupPromptManagerPresented = false }
                 )
             }
-        }
     }
 
     private func scrollToFeatureTourTarget(_ target: FeatureTourTarget?, using proxy: ScrollViewProxy) {
@@ -835,7 +868,11 @@ struct SettingsView: View {
 
     private var syncSettingsPane: some View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
-            settingsSection("iCloud Sync") {
+            mimoAccountSettingsSection
+
+            if MuesliICloudSyncEngine.hasRequiredEntitlement,
+               appState.mimoAccountEmail == nil {
+                settingsSection("Legacy iCloud Sync") {
                 HStack(spacing: MuesliTheme.spacing12) {
                     VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                         Text("Sync with iPhone or iPad")
@@ -865,7 +902,160 @@ struct SettingsView: View {
                         .frame(width: controlWidth)
                 }
 
+                }
             }
+        }
+    }
+
+    @ViewBuilder
+    private var mimoAccountSettingsSection: some View {
+        settingsSection("Mimo Account") {
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+                HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(MuesliTheme.accent)
+                        .frame(width: 34)
+
+                    VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                        Text("Sync across Mac, iPhone, and Android")
+                            .font(MuesliTheme.body())
+                            .foregroundStyle(MuesliTheme.textPrimary)
+                        Text("Transcripts, notes, and summaries sync through your private Mimo account. Audio and credentials stay on each device.")
+                            .font(MuesliTheme.caption())
+                            .foregroundStyle(MuesliTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: MuesliTheme.spacing12)
+                }
+
+                Divider().background(MuesliTheme.surfaceBorder)
+
+                if appState.mimoAccountState == .notConfigured {
+                    Label(
+                        appState.mimoAccountStatus ?? "Account sync is not configured in this build.",
+                        systemImage: "externaldrive.badge.exclamationmark"
+                    )
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                } else if let signedInEmail = appState.mimoAccountEmail {
+                    mimoSignedInControls(email: signedInEmail)
+                } else {
+                    mimoSignedOutControls
+                }
+
+                if let status = appState.mimoAccountStatus, appState.mimoAccountState != .notConfigured {
+                    Text(status)
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(mimoAccountStatusColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mimoSignedInControls(email: String) -> some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+            HStack(spacing: MuesliTheme.spacing8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(MuesliTheme.success)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(email)
+                        .font(MuesliTheme.body())
+                        .foregroundStyle(MuesliTheme.textPrimary)
+                    if let lastSyncedAt = appState.mimoAccountLastSyncedAt {
+                        Text("Last synced \(lastSyncedAt.formatted(.relative(presentation: .named)))")
+                            .font(MuesliTheme.caption())
+                            .foregroundStyle(MuesliTheme.textTertiary)
+                    }
+                }
+                Spacer()
+                if appState.isMimoAccountWorking {
+                    ProgressView().controlSize(.small)
+                }
+            }
+
+            HStack(spacing: MuesliTheme.spacing8) {
+                actionButton("Sync now", systemImage: "arrow.triangle.2.circlepath") {
+                    controller.performMimoAccountSync()
+                }
+                .disabled(appState.isMimoAccountWorking)
+                actionButton("Sign out", systemImage: "rectangle.portrait.and.arrow.right") {
+                    controller.signOutOfMimoAccount()
+                }
+                .disabled(appState.isMimoAccountWorking)
+            }
+
+            Button("Delete Mimo Account", role: .destructive) {
+                isShowingMimoAccountDeletionConfirmation = true
+            }
+            .buttonStyle(.plain)
+            .font(MuesliTheme.captionMedium())
+            .foregroundStyle(MuesliTheme.recording)
+            .disabled(appState.isMimoAccountWorking)
+        }
+    }
+
+    @ViewBuilder
+    private var mimoSignedOutControls: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+            if appState.mimoAccountState == .accountMismatch {
+                Label(
+                    "This Mac's local library is already bound to another Mimo account. Mimo will not upload it to a different account.",
+                    systemImage: "person.crop.circle.badge.exclamationmark"
+                )
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.recording)
+            }
+
+            if isCreatingMimoAccount {
+                TextField("Name (optional)", text: $mimoAccountDisplayName)
+                    .textFieldStyle(.roundedBorder)
+            }
+            TextField("Email", text: $mimoAccountEmail)
+                .textFieldStyle(.roundedBorder)
+            SecureField("Password", text: $mimoAccountPassword)
+                .textFieldStyle(.roundedBorder)
+
+            HStack(spacing: MuesliTheme.spacing8) {
+                actionButton(
+                    isCreatingMimoAccount ? "Create account" : "Sign in",
+                    systemImage: isCreatingMimoAccount ? "person.crop.circle.badge.plus" : "person.crop.circle"
+                ) {
+                    if isCreatingMimoAccount {
+                        controller.createMimoAccount(
+                            email: mimoAccountEmail,
+                            password: mimoAccountPassword,
+                            displayName: mimoAccountDisplayName
+                        )
+                    } else {
+                        controller.signInToMimoAccount(
+                            email: mimoAccountEmail,
+                            password: mimoAccountPassword
+                        )
+                    }
+                    mimoAccountPassword = ""
+                }
+                .disabled(appState.isMimoAccountWorking)
+
+                actionButton(isCreatingMimoAccount ? "I have an account" : "Create account") {
+                    isCreatingMimoAccount.toggle()
+                    mimoAccountPassword = ""
+                }
+                .disabled(appState.isMimoAccountWorking)
+            }
+        }
+    }
+
+    private var mimoAccountStatusColor: Color {
+        switch appState.mimoAccountState {
+        case .signedIn:
+            return MuesliTheme.success
+        case .accountMismatch, .error:
+            return MuesliTheme.recording
+        case .notConfigured, .signedOut, .working:
+            return MuesliTheme.textTertiary
         }
     }
 

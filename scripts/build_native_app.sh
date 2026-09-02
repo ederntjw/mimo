@@ -18,12 +18,14 @@ APP_SUPPORT_DIR_NAME="${MUESLI_SUPPORT_DIR_NAME:-$APP_DISPLAY_NAME}"
 BUNDLE_ID="${MUESLI_BUNDLE_ID:-com.muesli.app}"
 TELEMETRYDECK_APP_ID="${MUESLI_TELEMETRYDECK_APP_ID:-}"
 TELEMETRY_CHANNEL="${MUESLI_TELEMETRY_CHANNEL:-unconfigured}"
-DEFAULT_APP_VERSION="0.8.5"
+DEFAULT_APP_VERSION="0.8.6"
 APP_VERSION="${MUESLI_BUILD_VERSION:-$DEFAULT_APP_VERSION}"
 APP_BUNDLE_VERSION="${MUESLI_BUNDLE_VERSION:-$APP_VERSION}"
 APP_SHORT_VERSION="${MUESLI_SHORT_VERSION:-$APP_VERSION}"
 SPARKLE_FEED_URL="${MUESLI_SPARKLE_FEED_URL-https://muesli-hq.github.io/muesli/appcast.xml}"
 SPARKLE_EDKEY="${MUESLI_SPARKLE_EDKEY-ok9CQBJ3f0MJ2GXuGBubc6VyeWyb5exmqP2b9DceqH4=}"
+MIMO_SUPABASE_URL="${MIMO_SUPABASE_URL:-}"
+MIMO_SUPABASE_PUBLISHABLE_KEY="${MIMO_SUPABASE_PUBLISHABLE_KEY:-}"
 STAGED_APP_DIR="$DIST_DIR/$APP_BUNDLE_NAME"
 APP_DIR="$INSTALL_DIR/$APP_BUNDLE_NAME"
 DEFAULT_SIGN_IDENTITY="Developer ID Application: Pranav Hari Guruvayurappan (58W55QJ567)"
@@ -318,6 +320,41 @@ if [[ -f "$LOCALVQE_MODEL_PATH" ]]; then
   cp "$LOCALVQE_MODEL_PATH" "$STAGED_APP_DIR/Contents/Resources/Models/localvqe/localvqe-v1.2-1.3M-f32.gguf"
 fi
 
+# Every distributable includes a small offline transcript-cleanup model. It is
+# deliberately separate from the speech recognizers: Parakeet/Apple Speech
+# produce the transcript, then this model performs optional rewriting locally.
+MIMO_TINY_CLEANUP_MODEL_WAS_OVERRIDDEN=0
+if [[ -n "${MIMO_TINY_CLEANUP_MODEL_PATH:-}" ]]; then
+  MIMO_TINY_CLEANUP_MODEL_WAS_OVERRIDDEN=1
+fi
+MIMO_TINY_CLEANUP_MODEL_PATH="${MIMO_TINY_CLEANUP_MODEL_PATH:-$ROOT/assets/models/mimo-smollm2-360m-instruct-q3_k_m.gguf}"
+MIMO_TINY_CLEANUP_MODEL_SHA256="eb31394ff392eaca725fd9582eade3352adce2143704273846f0d194123fccf3"
+MIMO_TINY_CLEANUP_MODEL_URL="https://huggingface.co/unsloth/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q3_K_M.gguf"
+if [[ ! -f "$MIMO_TINY_CLEANUP_MODEL_PATH" ]]; then
+  if [[ "$MIMO_TINY_CLEANUP_MODEL_WAS_OVERRIDDEN" == "1" ]]; then
+    echo "ERROR: bundled Mimo Tiny Cleanup model is missing at $MIMO_TINY_CLEANUP_MODEL_PATH" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$MIMO_TINY_CLEANUP_MODEL_PATH")"
+  MIMO_TINY_CLEANUP_DOWNLOAD="${MIMO_TINY_CLEANUP_MODEL_PATH}.download.$$"
+  echo "Fetching the checksum-pinned Mimo Tiny Cleanup model..."
+  if curl --fail --location --retry 3 --output "$MIMO_TINY_CLEANUP_DOWNLOAD" "$MIMO_TINY_CLEANUP_MODEL_URL"; then
+    mv "$MIMO_TINY_CLEANUP_DOWNLOAD" "$MIMO_TINY_CLEANUP_MODEL_PATH"
+  else
+    rm -f "$MIMO_TINY_CLEANUP_DOWNLOAD"
+    echo "ERROR: could not fetch the bundled Mimo Tiny Cleanup model" >&2
+    exit 1
+  fi
+fi
+MIMO_TINY_CLEANUP_ACTUAL_SHA256="$(shasum -a 256 "$MIMO_TINY_CLEANUP_MODEL_PATH" | awk '{print $1}')"
+if [[ "$MIMO_TINY_CLEANUP_ACTUAL_SHA256" != "$MIMO_TINY_CLEANUP_MODEL_SHA256" ]]; then
+  echo "ERROR: bundled Mimo Tiny Cleanup model checksum mismatch" >&2
+  exit 1
+fi
+mkdir -p "$STAGED_APP_DIR/Contents/Resources/Models/postproc"
+cp "$MIMO_TINY_CLEANUP_MODEL_PATH" \
+  "$STAGED_APP_DIR/Contents/Resources/Models/postproc/mimo-smollm2-360m-instruct-q3_k_m.gguf"
+
 # Bundle assets
 cp "$ROOT/assets/menu_m_template.png" "$STAGED_APP_DIR/Contents/Resources/menu_m_template.png"
 cp "$ROOT/assets/muesli.icns" "$STAGED_APP_DIR/Contents/Resources/muesli.icns"
@@ -338,6 +375,9 @@ cp "$ROOT/assets/linkedin-logo.png" "$STAGED_APP_DIR/Contents/Resources/linkedin
 cp "$ROOT/assets/insights-share-background.png" "$STAGED_APP_DIR/Contents/Resources/insights-share-background.png"
 cp "$ROOT/assets/muesli_app_icon.png" "$STAGED_APP_DIR/Contents/Resources/muesli_app_icon.png"
 cp "$ROOT/assets/quill-icon.svg" "$STAGED_APP_DIR/Contents/Resources/quill-icon.svg"
+cp "$ROOT/NOTICE" "$STAGED_APP_DIR/Contents/Resources/THIRD-PARTY-NOTICES.txt"
+cp "$ROOT/native/MuesliNative/Sources/MuesliCore/Qwen3ASR/LICENSE-Apache-2.0" \
+  "$STAGED_APP_DIR/Contents/Resources/LICENSE-Apache-2.0.txt"
 if [[ -d "$ROOT/assets/fonts" ]]; then
   ditto "$ROOT/assets/fonts" "$STAGED_APP_DIR/Contents/Resources/fonts"
 fi
@@ -398,6 +438,14 @@ cat > "$STAGED_APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
+# The Supabase project URL and publishable client key are public app
+# configuration, not secrets. Leave both absent for local-only builds; the app
+# then keeps all data on this Mac and explains that account sync is unavailable.
+if [[ -n "$MIMO_SUPABASE_URL" && -n "$MIMO_SUPABASE_PUBLISHABLE_KEY" ]]; then
+  plutil -insert MimoSupabaseURL -string "$MIMO_SUPABASE_URL" "$STAGED_APP_DIR/Contents/Info.plist"
+  plutil -insert MimoSupabasePublishableKey -string "$MIMO_SUPABASE_PUBLISHABLE_KEY" "$STAGED_APP_DIR/Contents/Info.plist"
+fi
+
 # Replace existing app (no prompt — that's what this script is for)
 if [[ -d "$APP_DIR" ]]; then
   echo "Replacing $APP_DIR"
@@ -412,7 +460,8 @@ ditto "$STAGED_APP_DIR" "$APP_DIR"
 xattr -cr "$APP_DIR" 2>/dev/null || true
 
 if [[ "$SKIP_SIGN" != "1" ]]; then
-  if ! security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
+  if [[ "$SIGN_IDENTITY" != "-" ]] \
+    && ! security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY"; then
     echo "Signing identity not found: $SIGN_IDENTITY" >&2
     echo "For local contributor builds without this certificate, run: MUESLI_SKIP_SIGN=1 ./scripts/dev-test.sh" >&2
     exit 1

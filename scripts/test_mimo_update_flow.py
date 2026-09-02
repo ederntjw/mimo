@@ -24,7 +24,18 @@ class MimoUpdateFlowTests(unittest.TestCase):
         self.assertIn("--ed-key-file -", workflow)
         self.assertIn("--latest", workflow)
         self.assertIn(FEED_URL, workflow)
+        self.assertIn('MIMO_NOTARIZE: "1"', workflow)
+        self.assertIn("--require-notarized", workflow)
+        self.assertIn("MIMO_DEVELOPER_ID_CERTIFICATE_BASE64", workflow)
+        self.assertIn("MIMO_SUPABASE_PUBLISHABLE_KEY", workflow)
         self.assertNotIn("MIMO_SPARKLE_PRIVATE_KEY: 5", workflow)
+
+    def test_preview_and_notarized_dmg_modes_are_explicit(self) -> None:
+        script = (ROOT / "scripts/build_mimo_dmg.sh").read_text(encoding="utf-8")
+        self.assertIn("MIMO_NOTARIZE=1 requires MIMO_DEVELOPER_ID", script)
+        self.assertIn('notarize_artifact "$APP_ZIP" "Mimo.app"', script)
+        self.assertIn('notarize_artifact "$DMG_PATH"', script)
+        self.assertIn('xcrun stapler validate "$DMG_PATH"', script)
 
     def test_verifier_accepts_mimo_repository_contract(self) -> None:
         signature = base64.b64encode(bytes(64)).decode("ascii")

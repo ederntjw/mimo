@@ -770,10 +770,10 @@ struct MeetingsView: View {
                     .overlay(MuesliBrandThemeAccents())
 
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
-                    Text("Live Meeting")
+                    Text("Live Meeting or Lecture")
                         .font(MuesliTheme.title2())
                         .foregroundStyle(MuesliTheme.textPrimary)
-                    Text("Follow the conversation as it happens, then ask Mimo without interrupting the recording.")
+                    Text("Choose the note style, follow along live, and ask Mimo without interrupting the recording.")
                         .font(MuesliTheme.body())
                         .foregroundStyle(MuesliTheme.textSecondary)
                 }
@@ -799,35 +799,49 @@ struct MeetingsView: View {
                 )
             }
 
-            Button {
-                controller.startLiveMeetingFromMeetingsView()
-            } label: {
-                ZStack {
-                    HStack(spacing: MuesliTheme.spacing8) {
-                        Image(systemName: "mic.fill")
-                        Text("Start Live Meeting")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: MuesliTheme.spacing12) {
+                    liveSessionStartButton(
+                        title: "Start Live Meeting",
+                        detail: "Decisions, action items, and outcomes",
+                        systemImage: "person.3.fill",
+                        color: MuesliTheme.recording,
+                        accessibilityIdentifier: "meetings.startLiveMeetingButton"
+                    ) {
+                        controller.startLiveMeetingFromMeetingsView()
                     }
-
-                    HStack {
-                        Spacer(minLength: 0)
-                        Image(systemName: "arrow.right")
+                    liveSessionStartButton(
+                        title: "Start Lecture",
+                        detail: "Concepts, examples, and study notes",
+                        systemImage: "graduationcap.fill",
+                        color: MuesliTheme.accent,
+                        accessibilityIdentifier: "meetings.startLiveLectureButton"
+                    ) {
+                        controller.startLiveLectureFromMeetingsView()
                     }
                 }
-                .font(MuesliTheme.headline())
-                .foregroundStyle(.white)
-                .padding(.horizontal, MuesliTheme.spacing20)
-                .frame(maxWidth: .infinity, minHeight: 50)
-                .background(MuesliTheme.recording)
-                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium, style: .continuous))
-                .overlay(alignment: .topTrailing) {
-                    MuesliPrimaryActionThemeAccents()
-                        .offset(x: -4, y: 2)
+
+                VStack(spacing: MuesliTheme.spacing8) {
+                    liveSessionStartButton(
+                        title: "Start Live Meeting",
+                        detail: "Decisions, action items, and outcomes",
+                        systemImage: "person.3.fill",
+                        color: MuesliTheme.recording,
+                        accessibilityIdentifier: "meetings.startLiveMeetingButton.compact"
+                    ) {
+                        controller.startLiveMeetingFromMeetingsView()
+                    }
+                    liveSessionStartButton(
+                        title: "Start Lecture",
+                        detail: "Concepts, examples, and study notes",
+                        systemImage: "graduationcap.fill",
+                        color: MuesliTheme.accent,
+                        accessibilityIdentifier: "meetings.startLiveLectureButton.compact"
+                    ) {
+                        controller.startLiveLectureFromMeetingsView()
+                    }
                 }
             }
-            .buttonStyle(.plain)
-            .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
-            .help("Open Live Summary and begin local transcription")
-            .accessibilityIdentifier("meetings.startLiveMeetingButton")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MuesliTheme.spacing20)
@@ -846,6 +860,47 @@ struct MeetingsView: View {
         .shadow(color: MuesliTheme.accent.opacity(0.10), radius: 16, y: 6)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("meetings.liveMeetingStartPanel")
+    }
+
+    private func liveSessionStartButton(
+        title: String,
+        detail: String,
+        systemImage: String,
+        color: Color,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: MuesliTheme.spacing12) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 17, weight: .semibold))
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(MuesliTheme.headline())
+                    Text(detail)
+                        .font(MuesliTheme.caption())
+                        .opacity(0.86)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: MuesliTheme.spacing8)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 13, weight: .bold))
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, MuesliTheme.spacing16)
+            .frame(maxWidth: .infinity, minHeight: 58, alignment: .center)
+            .background(color)
+            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium, style: .continuous))
+            .overlay(alignment: .topTrailing) {
+                MuesliPrimaryActionThemeAccents()
+                    .offset(x: -4, y: 2)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+        .help("Open Live Summary and begin local transcription")
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 
     private func liveMeetingCapability(

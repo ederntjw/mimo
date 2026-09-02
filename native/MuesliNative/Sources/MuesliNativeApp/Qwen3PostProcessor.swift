@@ -118,6 +118,10 @@ enum Qwen3PostProcessorOutputCleaner {
 
         let assistantMarkers = [
             "the user is asking",
+            "<sys>",
+            "</sys>",
+            "<|system|>",
+            "<|assistant|>",
             "**analysis:**",
             "analysis:",
             "**action plan:**",
@@ -165,6 +169,36 @@ enum Qwen3PostProcessorOutputCleaner {
         text
             .replacingOccurrences(of: "…", with: "...")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+enum SmolLM2TranscriptNormalizer {
+    /// The compact model reliably restores punctuation but can conservatively
+    /// leave explicit hesitation tokens in place. Finish that narrow cleanup
+    /// deterministically; avoid broader words such as “like” that may carry
+    /// real meaning.
+    static func clean(_ text: String) -> String {
+        var result = text.replacingOccurrences(
+            of: #"(?i)(^|[.!?]\s+)(?:um+|uh+|erm+)(?=[,.;:!?\s]|$)[,;:]?\s*"#,
+            with: "$1",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"(?i),?\s+(?:um+|uh+|erm+)(?=[,.;:!?\s]|$)[,;:]?\s*"#,
+            with: " ",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(
+            of: #"[ \t]{2,}"#,
+            with: " ",
+            options: .regularExpression
+        )
+        result = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let firstLetter = result.firstIndex(where: { $0.isLetter }),
+           result[firstLetter].isLowercase {
+            result.replaceSubrange(firstLetter...firstLetter, with: result[firstLetter].uppercased())
+        }
+        return result
     }
 }
 
@@ -304,12 +338,20 @@ private actor Qwen3PostProcessorManager {
             switch inputFormat {
             case .configurable:
                 formattedInput = Qwen3PostProcessorConfig.formatInput(text, appContext: appContext)
+            case .smolLM2:
+                // The compact SmolLM2 baseline is easily distracted by XML-like wrappers.
+                // Its compact system instruction already defines the task, so
+                // provide only the transcript it must normalize.
+                formattedInput = text
             case .s1Mini:
                 formattedInput = Qwen3PostProcessorConfig.formatS1MiniInput(text)
             }
             await bot.respond(to: formattedInput, thinking: .suppressed)
             let raw = bot.output
-            let cleaned = Qwen3PostProcessorOutputCleaner.clean(raw)
+            let modelCleaned = Qwen3PostProcessorOutputCleaner.clean(raw)
+            let cleaned = inputFormat == .smolLM2
+                ? SmolLM2TranscriptNormalizer.clean(modelCleaned)
+                : modelCleaned
             Qwen3PostProcessorLogging.logVerbose("Qwen3 GGUF prompt chars=\(bot.preprocess(formattedInput, [], .suppressed).count)")
             Qwen3PostProcessorLogging.logVerbose("Qwen3 GGUF raw output: \(raw)")
             Qwen3PostProcessorLogging.logVerbose("Qwen3 GGUF cleaned output: \(cleaned)")
@@ -366,7 +408,18 @@ private actor Qwen3PostProcessorManager {
                 NSLocalizedDescriptionKey: "Failed to load Qwen3 GGUF model at \(modelURL.path)",
             ])
         }
-        loaded.useResolvedTemplate(systemPrompt: systemPrompt)
+        if inputFormat == .smolLM2 {
+            // SmolLM2 is a ChatML model. Its current GGUF metadata does not
+            // identify that family to LLM.swift, whose generic fallback is a
+            // Llama-style [INST] prompt that makes the tiny model emit control
+            // tokens instead of a cleaned transcript.
+            loaded.useResolvedTemplate(
+                systemPrompt: systemPrompt,
+                overriding: .chatML(systemPrompt)
+            )
+        } else {
+            loaded.useResolvedTemplate(systemPrompt: systemPrompt)
+        }
         bot = loaded
         return loaded
     }

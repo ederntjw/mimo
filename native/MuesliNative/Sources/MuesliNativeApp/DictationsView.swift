@@ -70,7 +70,7 @@ struct DictationsView: View {
             )
 
             if appState.config.showIOSCompanionPrompt {
-                IPhoneBridgeCard(appState: appState, controller: controller)
+                MimoAccountSyncCard(appState: appState, controller: controller)
                     .padding(.horizontal, MuesliTheme.spacing24)
                     .padding(.bottom, MuesliTheme.spacing12)
             }

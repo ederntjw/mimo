@@ -27,6 +27,14 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       GH_TOKEN: ${{ github.token }}
       MIMO_SPARKLE_PRIVATE_KEY: ${{ secrets.MIMO_SPARKLE_PRIVATE_KEY }}
+      MIMO_SUPABASE_URL: ${{ vars.MIMO_SUPABASE_URL }}
+      MIMO_SUPABASE_PUBLISHABLE_KEY: ${{ vars.MIMO_SUPABASE_PUBLISHABLE_KEY }}
+      MIMO_DEVELOPER_ID: ${{ vars.MIMO_DEVELOPER_ID }}
+      MIMO_DEVELOPER_ID_CERTIFICATE_BASE64: ${{ secrets.MIMO_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+      MIMO_DEVELOPER_ID_CERTIFICATE_PASSWORD: ${{ secrets.MIMO_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+      MIMO_NOTARY_APPLE_ID: ${{ secrets.MIMO_NOTARY_APPLE_ID }}
+      MIMO_NOTARY_APP_PASSWORD: ${{ secrets.MIMO_NOTARY_APP_PASSWORD }}
+      MIMO_NOTARY_TEAM_ID: ${{ secrets.MIMO_NOTARY_TEAM_ID }}
       DISPATCH_VERSION: ${{ inputs.version }}
       OUTPUT_DIR: dist-mimo-update
 
@@ -55,6 +63,20 @@ jobs:
             echo "Repository secret MIMO_SPARKLE_PRIVATE_KEY is not configured." >&2
             exit 2
           fi
+          for required in \
+            MIMO_SUPABASE_URL \
+            MIMO_SUPABASE_PUBLISHABLE_KEY \
+            MIMO_DEVELOPER_ID \
+            MIMO_DEVELOPER_ID_CERTIFICATE_BASE64 \
+            MIMO_DEVELOPER_ID_CERTIFICATE_PASSWORD \
+            MIMO_NOTARY_APPLE_ID \
+            MIMO_NOTARY_APP_PASSWORD \
+            MIMO_NOTARY_TEAM_ID; do
+            if [[ -z "${!required}" ]]; then
+              echo "Required Mimo release configuration $required is not configured." >&2
+              exit 2
+            fi
+          done
           if [[ ! -f "docs/release-notes/${version}.md" ]]; then
             echo "Missing docs/release-notes/${version}.md" >&2
             exit 2
@@ -72,6 +94,34 @@ jobs:
       - name: Install native build tooling
         run: brew install xcodegen
 
+      - name: Import Developer ID and configure Apple notarization
+        run: |
+          certificate_path="$RUNNER_TEMP/mimo-developer-id.p12"
+          keychain_path="$RUNNER_TEMP/mimo-signing.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$keychain_password"
+
+          printf '%s' "$MIMO_DEVELOPER_ID_CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -P "$MIMO_DEVELOPER_ID_CERTIFICATE_PASSWORD" \
+            -A -t cert -f pkcs12
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$keychain_password" "$keychain_path"
+          security list-keychains -d user -s "$keychain_path"
+          security default-keychain -d user -s "$keychain_path"
+
+          xcrun notarytool store-credentials MimoNotary \
+            --apple-id "$MIMO_NOTARY_APPLE_ID" \
+            --team-id "$MIMO_NOTARY_TEAM_ID" \
+            --password "$MIMO_NOTARY_APP_PASSWORD"
+          rm -f "$certificate_path"
+          echo "MIMO_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
       - name: Cache LocalVQE runtime
         uses: actions/cache@v4
         with:
@@ -85,6 +135,8 @@ jobs:
           MUESLI_BUILD_VERSION: ${{ steps.release.outputs.version }}
           MUESLI_BUNDLE_VERSION: ${{ steps.release.outputs.version }}
           MUESLI_SHORT_VERSION: ${{ steps.release.outputs.version }}
+          MIMO_NOTARIZE: "1"
+          MUESLI_NOTARY_PROFILE: MimoNotary
         run: ./scripts/build_mimo_dmg.sh
 
       - name: Generate signed Sparkle appcast
@@ -128,7 +180,8 @@ jobs:
             --feed-url "https://github.com/ederntjw/mimo/releases/latest/download/appcast.xml" \
             --github-repository ederntjw/mimo \
             --release-tag "$RELEASE_TAG" \
-            --require-release-notes
+            --require-release-notes \
+            --require-notarized
 
       - name: Publish GitHub release and update feed
         env:
@@ -164,3 +217,10 @@ jobs:
           done
           echo "The release exists, but the latest appcast redirect did not converge in time." >&2
           exit 1
+
+      - name: Remove temporary signing keychain
+        if: always()
+        run: |
+          if [[ -n "${MIMO_RELEASE_KEYCHAIN:-}" && -f "$MIMO_RELEASE_KEYCHAIN" ]]; then
+            security delete-keychain "$MIMO_RELEASE_KEYCHAIN" || true
+          fi

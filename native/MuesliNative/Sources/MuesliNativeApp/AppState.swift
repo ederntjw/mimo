@@ -136,6 +136,15 @@ enum ICloudBridgeState: Equatable {
     case error
 }
 
+enum MimoAccountState: Equatable {
+    case notConfigured
+    case signedOut
+    case signedIn
+    case working
+    case accountMismatch
+    case error
+}
+
 enum ICloudBridgeCompanionDiscoveryState: Equatable {
     case idle
     case waiting
@@ -253,6 +262,12 @@ final class AppState {
     }
     var iCloudLastSyncSummary: String?
     var iCloudLastSyncedAt: Date?
+    var mimoAccountState: MimoAccountState = .notConfigured
+    var mimoAccountEmail: String?
+    var mimoAccountStatus: String?
+    var isMimoAccountWorking: Bool = false
+    var mimoAccountLastSyncSummary: String?
+    var mimoAccountLastSyncedAt: Date?
     var contributionMilestonePrompt: ContributionMilestonePrompt?
     var pendingDiagnosticIncident: DiagnosticIncident?
     var modelPreparationTitle: String?

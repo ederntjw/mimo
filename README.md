@@ -101,13 +101,15 @@ Transcription and reasoning are separate choices in Mimo.
 |---|---|---|
 | Live and batch transcription | Parakeet Unified on-device | Parakeet Realtime EOU, Nemotron, Whisper, Apple Speech, Qwen3 ASR, SenseVoice, and hosted transcription |
 | Meeting summaries and live Q&A | ChatGPT subscription sign-in | OpenAI or OpenRouter with an API key, Ollama, LM Studio, or a compatible custom endpoint |
-| Quill and dictation cleanup | The configured cleanup model | ChatGPT, hosted providers, or supported local models |
+| Dictation transcript cleanup | Mimo Tiny Cleanup, bundled on-device | ChatGPT, hosted providers, or larger supported local models |
+| Quill voice editing | ChatGPT subscription or a general-purpose local model | OpenAI, OpenRouter, Ollama, LM Studio, or a custom endpoint |
 
 With an on-device transcription model, microphone audio is processed locally.
 If you select a hosted transcription provider, audio is sent to that provider. If
 you select ChatGPT or another hosted reasoning provider for summaries, questions,
 or cleanup, the relevant transcript or text is sent only for that requested task.
-Credentials are stored in Mimo's app-support directory with owner-only permissions.
+Account sessions are stored in macOS Keychain. Provider credentials remain local
+to the device and are never part of Mimo Account sync.
 
 ## Install
 
@@ -139,8 +141,11 @@ Maintainers publish an update from a clean, CI-passing `main` branch with one ta
 
 The tag-triggered GitHub workflow builds the native Mac app, signs the update
 metadata using the protected `MIMO_SPARKLE_PRIVATE_KEY` repository secret, verifies
-the exact DMG, creates the GitHub Release, and moves the stable appcast feed to it.
-The private signing key is never committed to this repository.
+the exact DMG, submits the Developer ID-signed app and disk image to Apple for
+notarization, staples both tickets, creates the GitHub Release, and moves the stable
+appcast feed to it. The release workflow fails closed when the Supabase client
+configuration or any signing/notary credential is missing. Private keys are never
+committed to this repository.
 
 ### Requirements
 
@@ -151,8 +156,9 @@ The private signing key is never committed to this repository.
 - Accessibility and Input Monitoring for global hotkeys and text insertion
 - System Audio Recording for online-meeting capture
 
-The recommended Parakeet model downloads on first setup, so allow roughly 450 MB
-for its model files in addition to the application.
+The application includes the roughly 235 MB Mimo Tiny Cleanup text model. The
+recommended Parakeet speech model downloads on first setup, so allow roughly
+450 MB more for its transcription files.
 
 ## Build and test
 

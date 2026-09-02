@@ -156,12 +156,16 @@ fi
 
 use_local_only_entitlements() {
   RESOLVED_PROVISIONING_PROFILE=""
-  RESOLVED_SIGN_IDENTITY=""
-  RESOLVED_CODESIGN_TIMESTAMP=""
+  # Ad-hoc signing preserves a stable code identity for local TCC testing
+  # without requiring the upstream maintainer's Developer ID certificate.
+  RESOLVED_SIGN_IDENTITY="-"
+  RESOLVED_CODESIGN_TIMESTAMP="none"
   BUILD_ENV+=(
     MUESLI_ENTITLEMENTS="$ROOT/scripts/MuesliLocalOnly.entitlements"
     MUESLI_PROVISIONING_PROFILE=""
     MUESLI_APS_ENVIRONMENT=""
+    MUESLI_SIGN_IDENTITY="-"
+    MUESLI_CODESIGN_TIMESTAMP="none"
   )
 }
 

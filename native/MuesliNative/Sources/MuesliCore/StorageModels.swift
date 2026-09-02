@@ -28,6 +28,7 @@ public enum MeetingRecordingSavePolicy: String, Codable, CaseIterable, Sendable 
 
 public enum MeetingSource: String, Codable, Sendable {
     case meeting
+    case lecture
     case iOS = "ios"
     case audioImport = "audio_import"
 }
@@ -59,6 +60,10 @@ public struct SyncTextRecord: Identifiable, Codable, Sendable, Equatable {
     public var engineIdentifier: String?
     public var createdAt: Date
     public var updatedAt: Date
+    /// Tracks handwritten meeting notes independently from transcript/summary
+    /// updates so cross-platform sync cannot replace newer notes with an older
+    /// record-level winner.
+    public var manualNotesUpdatedAt: Date?
     public var startedAt: Date?
     public var endedAt: Date?
     public var durationSeconds: Double
@@ -84,6 +89,7 @@ public struct SyncTextRecord: Identifiable, Codable, Sendable, Equatable {
         engineIdentifier: String? = nil,
         createdAt: Date,
         updatedAt: Date,
+        manualNotesUpdatedAt: Date? = nil,
         startedAt: Date? = nil,
         endedAt: Date? = nil,
         durationSeconds: Double,
@@ -106,6 +112,7 @@ public struct SyncTextRecord: Identifiable, Codable, Sendable, Equatable {
         self.engineIdentifier = engineIdentifier
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.manualNotesUpdatedAt = manualNotesUpdatedAt
         self.startedAt = startedAt
         self.endedAt = endedAt
         self.durationSeconds = durationSeconds
@@ -114,6 +121,33 @@ public struct SyncTextRecord: Identifiable, Codable, Sendable, Equatable {
         self.cloudChangeTag = cloudChangeTag
         self.cloudSystemFields = cloudSystemFields
         self.followUpToRecordName = followUpToRecordName
+    }
+}
+
+/// One server snapshot selected by a transport for atomic page import. When
+/// `replacingLocalUpdatedAt` is present, the write is applied only if that exact
+/// local version still exists, protecting edits made while a request was in
+/// flight.
+public struct SyncTextRecordPageItem: Sendable, Equatable {
+    public let record: SyncTextRecord
+    public let replacingLocalUpdatedAt: Date?
+
+    public init(record: SyncTextRecord, replacingLocalUpdatedAt: Date? = nil) {
+        self.record = record
+        self.replacingLocalUpdatedAt = replacingLocalUpdatedAt
+    }
+}
+
+/// Advances transport metadata without touching the local text payload.
+public struct SyncTextRecordMetadataUpdate: Sendable, Equatable {
+    public let kind: SyncTextRecordKind
+    public let recordName: String
+    public let changeTag: String?
+
+    public init(kind: SyncTextRecordKind, recordName: String, changeTag: String?) {
+        self.kind = kind
+        self.recordName = recordName
+        self.changeTag = changeTag
     }
 }
 

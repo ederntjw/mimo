@@ -63,6 +63,10 @@ struct LiveMeetingAssistantSection: View {
         question.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var isLecture: Bool {
+        controller.meeting(id: meetingID)?.source == .lecture
+    }
+
     var body: some View {
         VStack(spacing: MuesliTheme.spacing12) {
             liveBrief
@@ -84,7 +88,7 @@ struct LiveMeetingAssistantSection: View {
             HStack(spacing: MuesliTheme.spacing8) {
                 Image(systemName: "sparkles")
                     .foregroundStyle(MuesliTheme.accent)
-                Text("Live Summary")
+                Text(isLecture ? "Live Lecture Summary" : "Live Summary")
                     .font(MuesliTheme.headline())
                     .foregroundStyle(MuesliTheme.textPrimary)
                 Circle()
@@ -126,7 +130,7 @@ struct LiveMeetingAssistantSection: View {
 
             if appState.liveMeetingSummary.isEmpty {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
-                    Text(appState.isLiveMeetingSummaryRefreshing ? "Reading what has been said so far…" : "Your first rolling summary appears after roughly 10–15 seconds of committed speech.")
+                    Text(appState.isLiveMeetingSummaryRefreshing ? "Reading what has been said so far…" : "Your first rolling \(isLecture ? "lecture" : "meeting") summary appears after roughly 10–15 seconds of committed speech.")
                         .font(MuesliTheme.body())
                         .foregroundStyle(MuesliTheme.textSecondary)
                     Text("You can ask a question at any time; only committed transcript text is used.")
@@ -171,7 +175,9 @@ struct LiveMeetingAssistantSection: View {
                             }
                                 .font(MuesliTheme.headline())
                                 .foregroundStyle(MuesliTheme.textPrimary)
-                            Text("Try “What did they say about the deadline?” or “Which action items are mine?”")
+                            Text(isLecture
+                                ? "Try “How did they define this concept?” or “What should I review?”"
+                                : "Try “What did they say about the deadline?” or “Which action items are mine?”")
                                 .font(MuesliTheme.body())
                                 .foregroundStyle(MuesliTheme.textSecondary)
                         }
@@ -222,7 +228,7 @@ struct LiveMeetingAssistantSection: View {
 
     private var composer: some View {
         HStack(alignment: .center, spacing: MuesliTheme.spacing8) {
-            TextField("Ask Mimo about what has already been said…", text: $question)
+            TextField(isLecture ? "Ask Mimo about the lecture so far…" : "Ask Mimo about what has already been said…", text: $question)
                 .textFieldStyle(.plain)
                 .focused($questionFieldFocused)
                 .onSubmit(submitQuestion)
@@ -237,7 +243,7 @@ struct LiveMeetingAssistantSection: View {
             }
             .buttonStyle(.plain)
             .disabled(trimmedQuestion.isEmpty || appState.isLiveMeetingAssistantAnswering)
-            .help("Ask about the meeting so far")
+            .help(isLecture ? "Ask about the lecture so far" : "Ask about the meeting so far")
         }
         .padding(.horizontal, MuesliTheme.spacing12)
         .frame(height: 44)

@@ -72,6 +72,7 @@ struct MeetingTemplateDefinition: Identifiable, Equatable, Sendable {
 
 enum MeetingTemplates {
     static let autoID = "auto"
+    static let lectureID = "lecture"
     static let customIconFallback = "square.and.pencil"
 
     struct CustomIconOption: Identifiable, Equatable, Sendable {
@@ -107,7 +108,39 @@ enum MeetingTemplates {
         """
     )
 
+    static let lecture = MeetingTemplateDefinition(
+        id: lectureID,
+        title: "Lecture",
+        category: "Learning",
+        icon: "graduationcap.fill",
+        kind: .builtin,
+        promptBody: """
+        Use this structure exactly:
+
+        ## Lecture Overview
+        A concise explanation of the lecture's subject, scope, and central thesis.
+
+        ## Core Concepts
+        - The main ideas, definitions, frameworks, and principles taught
+
+        ## Detailed Notes
+        - Important explanations, examples, evidence, formulas, or demonstrations in teaching order
+
+        ## Key Terms
+        - **Term:** Clear definition or meaning from the lecture
+
+        ## Questions and Unclear Points
+        - Questions raised, unresolved points, or material that deserves review
+
+        ## Study Checklist
+        - [ ] Facts, concepts, or skills to review after the lecture
+
+        Preserve technical detail and the lecturer's important examples. Do not invent assignments, conclusions, or definitions that were not stated.
+        """
+    )
+
     static let builtIns: [MeetingTemplateDefinition] = [
+        lecture,
         MeetingTemplateDefinition(
             id: "one-to-one",
             title: "1 to 1",

@@ -711,7 +711,7 @@ struct ModelsView: View {
                         .background(MuesliTheme.success.opacity(0.15))
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else if isDownloaded {
-                    Text("Downloaded")
+                    Text(option.isBundled ? "Included" : "Downloaded")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(MuesliTheme.textTertiary)
                         .padding(.horizontal, 8)
@@ -755,15 +755,17 @@ struct ModelsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
                     }
 
-                    Button {
-                        postProcModelToDelete = option
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.red.opacity(0.6))
-                            .frame(width: 20, height: 20)
+                    if !option.isBundled {
+                        Button {
+                            postProcModelToDelete = option
+                        } label: {
+                            Image(systemName: "trash")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.red.opacity(0.6))
+                                .frame(width: 20, height: 20)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 } else if option.isDownloadable {
                     Button("Download") {
                         startPostProcDownload(option)

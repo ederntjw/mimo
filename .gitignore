@@ -86,6 +86,10 @@ tmp-install/
 *.db
 /test-audio/
 
+# Build-fetched bundled inference assets (checksum-pinned in build_native_app.sh)
+/assets/models/*.gguf
+/dist-mimo-*/
+
 # Separate mobile companion checkout (maintained in its own repository)
 /muesli-ios/
 

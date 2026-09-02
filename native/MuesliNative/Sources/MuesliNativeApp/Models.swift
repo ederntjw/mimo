@@ -957,6 +957,9 @@ struct PostProcessorOption: Identifiable, Equatable {
     enum InputFormat: Hashable {
         /// The existing Muesli/Qwen cleanup prompt, which users may customize.
         case configurable
+        /// SmolLM2 uses ChatML but its GGUF metadata is not currently resolved
+        /// by LLM.swift, so Mimo must select that template explicitly.
+        case smolLM2
         /// S1-mini is trained on a fixed prompt and control-line contract.
         case s1Mini
     }
@@ -969,6 +972,7 @@ struct PostProcessorOption: Identifiable, Equatable {
     let filename: String
     let inputFormat: InputFormat
     let isDownloadable: Bool
+    let isBundled: Bool
 
     init(
         id: String,
@@ -978,7 +982,8 @@ struct PostProcessorOption: Identifiable, Equatable {
         downloadURL: URL,
         filename: String,
         inputFormat: InputFormat = .configurable,
-        isDownloadable: Bool = true
+        isDownloadable: Bool = true,
+        isBundled: Bool = false
     ) {
         self.id = id
         self.label = label
@@ -988,6 +993,7 @@ struct PostProcessorOption: Identifiable, Equatable {
         self.filename = filename
         self.inputFormat = inputFormat
         self.isDownloadable = isDownloadable
+        self.isBundled = isBundled
     }
 
     var cacheDirectory: URL {
@@ -996,7 +1002,36 @@ struct PostProcessorOption: Identifiable, Equatable {
     }
 
     var modelURL: URL {
-        cacheDirectory.appendingPathComponent(filename)
+        if isBundled, let bundledModelURL {
+            return bundledModelURL
+        }
+        return cacheDirectory.appendingPathComponent(filename)
+    }
+
+    private var bundledModelURL: URL? {
+        let fileManager = FileManager.default
+        if let resourceURL = Bundle.main.resourceURL {
+            let candidate = resourceURL
+                .appendingPathComponent("Models/postproc", isDirectory: true)
+                .appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+
+        // SwiftPM tests and command-line development do not run inside the
+        // staged .app, so resolve the same committed asset from the repo.
+        var searchURL = URL(fileURLWithPath: fileManager.currentDirectoryPath)
+        for _ in 0..<8 {
+            let candidate = searchURL
+                .appendingPathComponent("assets/models", isDirectory: true)
+                .appendingPathComponent(filename)
+            if fileManager.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+            searchURL.deleteLastPathComponent()
+        }
+        return nil
     }
 
     var isDownloaded: Bool {
@@ -1047,6 +1082,22 @@ struct PostProcessorOption: Identifiable, Equatable {
         filename: "Qwen3.5-0.8B-Q4_K_M.gguf"
     )
 
+    /// A deliberately small, bundled baseline for people who want dictation
+    /// cleanup without signing in or downloading a half-gigabyte model.
+    /// Advanced cleanup models remain available for more reliable correction
+    /// cues and list formatting.
+    static let mimoTiny = PostProcessorOption(
+        id: "mimo-tiny-cleanup-v1",
+        label: "Mimo Tiny Cleanup",
+        sizeLabel: "~235 MB · Included",
+        description: "A fast, English-first on-device baseline for punctuation, filler words, and obvious transcription mistakes. Designed to run comfortably on M1 Macs with no account or network connection.",
+        downloadURL: URL(string: "https://huggingface.co/unsloth/SmolLM2-360M-Instruct-GGUF/resolve/main/SmolLM2-360M-Instruct-Q3_K_M.gguf")!,
+        filename: "mimo-smollm2-360m-instruct-q3_k_m.gguf",
+        inputFormat: .smolLM2,
+        isDownloadable: false,
+        isBundled: true
+    )
+
     // Fine-tuned Qwen3.5-0.8B v3 trained on Muesli dictation correction data.
     static let finetunedV3 = PostProcessorOption(
         id: "qwen35-postproc-v3",
@@ -1067,8 +1118,8 @@ struct PostProcessorOption: Identifiable, Equatable {
         inputFormat: .s1Mini
     )
 
-    static let all: [PostProcessorOption] = [.finetunedV3, .s1Mini, .qwen35_0_8b]
-    static let defaultOption: PostProcessorOption = .finetunedV3
+    static let all: [PostProcessorOption] = [.mimoTiny, .finetunedV3, .s1Mini, .qwen35_0_8b]
+    static let defaultOption: PostProcessorOption = .mimoTiny
     static let defaultQuilOption: PostProcessorOption = .qwen35_0_8b
 
     /// Includes retired options that remain runnable when they are already
@@ -1135,10 +1186,21 @@ struct PostProcessorOption: Identifiable, Equatable {
     /// S1-mini was trained on this exact system prompt and rejects prompt customization.
     static let s1MiniSystemPrompt = "You are a text normalizer for speech-to-text transcripts. The input begins with a control line specifying the styling, structure, and context settings; clean the transcript to match those settings and output only the cleaned text."
 
+    /// Keep the bundled 360M model's instruction compact so its small context
+    /// and capacity are spent on the transcript instead of policy prose.
+    static let smolLM2SystemPrompt = """
+    Clean speech transcripts. Remove filler words such as um and uh, and fix obvious punctuation and capitalization. Preserve meaning and wording. Output only the cleaned text.
+
+    Example input: Um, hello there.
+    Example output: Hello there.
+    """
+
     func effectiveSystemPrompt(configuredSystemPrompt: String) -> String {
         switch inputFormat {
         case .configurable:
             configuredSystemPrompt
+        case .smolLM2:
+            Self.smolLM2SystemPrompt
         case .s1Mini:
             Self.s1MiniSystemPrompt
         }

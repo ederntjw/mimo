@@ -6,8 +6,9 @@ source "$ROOT/scripts/localvqe_runtime.sh"
 BUILD_CONFIG="${1:-debug}"
 INSTALL_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/muesli-packaging-test.XXXXXX")"
 APP_BUNDLE_NAME="MuesliPackagingTest.app"
+APP_EXECUTABLE_NAME="MuesliPackagingTest"
 APP_PATH="$INSTALL_ROOT/$APP_BUNDLE_NAME"
-APP_BIN="$APP_PATH/Contents/MacOS/Muesli"
+APP_BIN="$APP_PATH/Contents/MacOS/$APP_EXECUTABLE_NAME"
 CLI_BIN="$APP_PATH/Contents/MacOS/muesli-cli"
 SPEC_OUTPUT="$INSTALL_ROOT/muesli-cli-spec.json"
 TRANSCRIBE_HELP_OUTPUT="$INSTALL_ROOT/muesli-cli-transcribe-help.txt"
@@ -26,6 +27,7 @@ fi
 echo "Building isolated app bundle in $INSTALL_ROOT"
 MUESLI_INSTALL_DIR="$INSTALL_ROOT" \
 MUESLI_APP_BUNDLE_NAME="$APP_BUNDLE_NAME" \
+MUESLI_EXECUTABLE_NAME="$APP_EXECUTABLE_NAME" \
 MUESLI_SKIP_SIGN=1 \
 MUESLI_REQUIRE_LOCALVQE=1 \
 "$ROOT/scripts/build_native_app.sh" "$BUILD_CONFIG"

@@ -1,4 +1,5 @@
 import Foundation
+import MuesliCore
 import Testing
 @testable import MuesliNativeApp
 
@@ -6,9 +7,59 @@ import Testing
 struct LiveMeetingAssistantTests {
     @Test("live summary becomes visible during a short meeting")
     func responsiveCheckpointTiming() {
-        #expect(LiveMeetingSummaryPolicy.initialDelay <= 15)
-        #expect(LiveMeetingSummaryPolicy.refreshDelay <= 30)
+        #expect(LiveMeetingSummaryPolicy.initialDelay == 12)
+        #expect(LiveMeetingSummaryPolicy.refreshDelay == 30)
         #expect(LiveMeetingSummaryPolicy.minimumTranscriptCharacters <= 160)
+    }
+
+    @Test("recording meetings open directly on Live Summary")
+    func liveSummaryIsDefaultWorkspace() {
+        #expect(LiveMeetingWorkspacePolicy.opensLiveSummary(for: .recording))
+        #expect(!LiveMeetingWorkspacePolicy.opensLiveSummary(for: .processing))
+        #expect(!LiveMeetingWorkspacePolicy.opensLiveSummary(for: .completed))
+    }
+
+    @Test("Live Meeting always uses ChatGPT subscription with GPT-5.4 Mini")
+    func subscriptionModelPolicy() {
+        var configured = AppConfig()
+        configured.meetingSummaryBackend = MeetingSummaryBackendOption.ollama.backend
+        configured.chatGPTModel = "gpt-5.4"
+
+        let live = MeetingSummaryClient.liveMeetingConfiguration(from: configured)
+
+        #expect(live.meetingSummaryBackend == MeetingSummaryBackendOption.chatGPT.backend)
+        #expect(live.chatGPTModel == "gpt-5.4-mini")
+        #expect(MeetingSummaryClient.liveMeetingBackend == "chatgpt")
+        #expect(MeetingSummaryClient.liveMeetingModel == "gpt-5.4-mini")
+    }
+
+    @Test("Live Meeting prefers configured local Parakeet or Apple Speech")
+    func localTranscriptionPolicy() {
+        let available: [BackendOption] = [
+            .whisperSmall,
+            .appleSpeechAnalyzer,
+            .parakeetMultilingual,
+            .parakeetUnified,
+        ]
+
+        #expect(
+            BackendOption.resolvedLiveMeetingTranscriptionBackend(
+                configured: .appleSpeechAnalyzer,
+                availableOptions: available
+            ) == .appleSpeechAnalyzer
+        )
+        #expect(
+            BackendOption.resolvedLiveMeetingTranscriptionBackend(
+                configured: .whisperSmall,
+                availableOptions: available
+            ) == .parakeetUnified
+        )
+        #expect(
+            BackendOption.resolvedLiveMeetingTranscriptionBackend(
+                configured: .whisperSmall,
+                availableOptions: [.whisperSmall]
+            ) == nil
+        )
     }
 
     @Test("rolling summary waits for enough committed transcript")

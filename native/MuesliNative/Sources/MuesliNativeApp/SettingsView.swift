@@ -2315,14 +2315,7 @@ struct SettingsView: View {
             }
         } label: {
             HStack(alignment: .top, spacing: MuesliTheme.spacing8) {
-                ZStack {
-                    Circle()
-                        .fill(theme.previewAccent.opacity(0.16))
-                    Image(systemName: theme.icon)
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundStyle(theme.previewAccent)
-                }
-                .frame(width: 30, height: 30)
+                MimoApplicationIconView(theme: theme, size: 30)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(theme.label)

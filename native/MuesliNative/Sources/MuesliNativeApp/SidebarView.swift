@@ -264,22 +264,12 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var sidebarHeader: some View {
+        let visualTheme = MuesliVisualTheme.resolved(appState.config.visualTheme)
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                 HStack(spacing: MuesliTheme.spacing12) {
-                    Group {
-                        if appState.config.menuBarIcon == "muesli",
-                           let img = MenuBarIconRenderer.make(choice: "muesli") {
-                            Image(nsImage: img)
-                                .resizable()
-                                .scaledToFit()
-                        } else {
-                            Image(systemName: appState.config.menuBarIcon)
-                        }
-                    }
-                    .frame(width: 22, height: 22)
-                    .foregroundStyle(MuesliTheme.accent)
-                    .overlay(MuesliBrandThemeAccents())
+                    MimoApplicationIconView(theme: visualTheme, size: 30)
+                        .overlay(MuesliBrandThemeAccents())
                     Text(AppIdentity.brandName)
                         .font(MuesliTheme.title2())
                         .foregroundStyle(MuesliTheme.textPrimary)

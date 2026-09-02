@@ -443,6 +443,7 @@ public final class MuesliController: NSObject {
     /// session-identity gate. Replaced on the next meeting start.
     private var micEpisodeTelemetryGate = RecentMeetingIdentityGate()
     private var liveMeetingTranscriptGeneration: UUID?
+    private var liveMeetingSummaryRefreshTask: Task<Void, Never>?
     private var liveMeetingSummaryTask: Task<Void, Never>?
     private var liveMeetingSummaryRequestID: UUID?
     private var liveMeetingAssistantTask: Task<Void, Never>?
@@ -1523,6 +1524,33 @@ public final class MuesliController: NSObject {
         normalizeMeetingTranscriptionSelectionForAvailability()
     }
 
+    @discardableResult
+    private func normalizeLiveMeetingTranscriptionSelectionForAvailability(
+        availableOptions: [BackendOption] = BackendOption.downloaded
+    ) -> BackendOption? {
+        let configured = BackendOption.resolve(
+            backend: config.meetingTranscriptionBackend,
+            model: config.meetingTranscriptionModel
+        )
+        guard let resolved = BackendOption.resolvedLiveMeetingTranscriptionBackend(
+            configured: configured,
+            availableOptions: availableOptions
+        ) else {
+            return nil
+        }
+
+        selectedMeetingTranscriptionBackend = resolved
+        appState.selectedMeetingTranscriptionBackend = resolved
+        if config.meetingTranscriptionBackend != resolved.backend
+            || config.meetingTranscriptionModel != resolved.model {
+            config.meetingTranscriptionBackend = resolved.backend
+            config.meetingTranscriptionModel = resolved.model
+            configStore.save(config)
+            appState.config = config
+        }
+        return resolved
+    }
+
     func updateConfig(
         iCloudDisableCompletionStatus: String? = nil,
         _ mutate: (inout AppConfig) -> Void
@@ -1720,6 +1748,8 @@ public final class MuesliController: NSObject {
     }
 
     private func resetLiveMeetingAssistantState() {
+        liveMeetingSummaryRefreshTask?.cancel()
+        liveMeetingSummaryRefreshTask = nil
         liveMeetingSummaryTask?.cancel()
         liveMeetingSummaryTask = nil
         liveMeetingSummaryRequestID = nil
@@ -1750,45 +1780,51 @@ public final class MuesliController: NSObject {
         generation: UUID,
         meetingTitle: String
     ) {
-        guard liveMeetingSummaryTask == nil,
+        guard liveMeetingSummaryRefreshTask == nil,
               isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) else {
             return
         }
-        let delay = liveMeetingSummaryLastTranscriptCount == 0
-            ? LiveMeetingSummaryPolicy.initialDelay
-            : LiveMeetingSummaryPolicy.refreshDelay
-        let requestID = UUID()
-        liveMeetingSummaryRequestID = requestID
-        liveMeetingSummaryTask = Task { @MainActor [weak self] in
+        liveMeetingSummaryRefreshTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                // Match iPhone: the first checkpoint is measured from the
+                // first committed transcript chunk, then the ticker continues
+                // every 30 seconds even when one checkpoint has too little new
+                // speech to warrant another model request.
+                try await Task.sleep(
+                    nanoseconds: UInt64(LiveMeetingSummaryPolicy.initialDelay * 1_000_000_000)
+                )
             } catch {
                 return
             }
-            guard let self,
-                  self.liveMeetingSummaryRequestID == requestID,
-                  self.isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) else {
-                return
+
+            while !Task.isCancelled {
+                guard let self,
+                      self.isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) else {
+                    return
+                }
+                self.generateLiveMeetingSummary(
+                    ownerID: ownerID,
+                    generation: generation,
+                    meetingTitle: meetingTitle,
+                    force: false
+                )
+                do {
+                    try await Task.sleep(
+                        nanoseconds: UInt64(LiveMeetingSummaryPolicy.refreshDelay * 1_000_000_000)
+                    )
+                } catch {
+                    return
+                }
             }
-            self.liveMeetingSummaryTask = nil
-            self.liveMeetingSummaryRequestID = nil
-            self.generateLiveMeetingSummary(
-                ownerID: ownerID,
-                generation: generation,
-                meetingTitle: meetingTitle,
-                force: false
-            )
         }
     }
 
     func refreshLiveMeetingSummary(meetingID: Int64) {
         guard appState.liveMeetingTranscriptOwnerID == meetingID,
-              let generation = liveMeetingTranscriptGeneration else {
+              let generation = liveMeetingTranscriptGeneration,
+              !appState.isLiveMeetingSummaryRefreshing else {
             return
         }
-        liveMeetingSummaryTask?.cancel()
-        liveMeetingSummaryTask = nil
-        liveMeetingSummaryRequestID = nil
         generateLiveMeetingSummary(
             ownerID: meetingID,
             generation: generation,
@@ -1805,6 +1841,7 @@ public final class MuesliController: NSObject {
     ) {
         let transcript = committedLiveMeetingTranscript(meetingID: ownerID)
         let transcriptCount = transcript.count
+        guard !appState.isLiveMeetingSummaryRefreshing else { return }
         guard !transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             appState.liveMeetingAssistantError = "Waiting for committed speech before creating a live brief."
             return
@@ -1824,7 +1861,6 @@ public final class MuesliController: NSObject {
         appState.liveMeetingAssistantError = nil
         liveMeetingSummaryTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            var shouldScheduleNextRefresh = false
             do {
                 let digest = try await MeetingSummaryClient.summarizeLiveMeeting(
                     transcript: transcript,
@@ -1839,7 +1875,6 @@ public final class MuesliController: NSObject {
                 self.appState.liveMeetingSummary = digest
                 self.appState.liveMeetingSummaryUpdatedAt = Date()
                 self.liveMeetingSummaryLastTranscriptCount = transcriptCount
-                shouldScheduleNextRefresh = true
             } catch is CancellationError {
                 return
             } catch {
@@ -1854,14 +1889,6 @@ public final class MuesliController: NSObject {
             self.liveMeetingSummaryTask = nil
             self.liveMeetingSummaryRequestID = nil
             self.appState.isLiveMeetingSummaryRefreshing = false
-            if shouldScheduleNextRefresh,
-               self.isCurrentLiveMeetingTranscriptSession(ownerID: ownerID, generation: generation) {
-                self.scheduleLiveMeetingSummary(
-                    ownerID: ownerID,
-                    generation: generation,
-                    meetingTitle: meetingTitle
-                )
-            }
         }
     }
 
@@ -6392,6 +6419,23 @@ public final class MuesliController: NSObject {
         startMeetingRecordingFromEntryPoint(
             title: title,
             dashboardWindowPresentation: .compactMeetingTrailing
+        )
+    }
+
+    @discardableResult
+    func startLiveMeetingFromMeetingsView(title: String = "Live Meeting") -> Bool {
+        guard normalizeLiveMeetingTranscriptionSelectionForAvailability() != nil else {
+            presentErrorAlert(
+                title: "Live Meeting needs a local transcriber",
+                message: "Download a Parakeet model in Models, or use Apple Speech on a supported Mac, then try again."
+            )
+            return false
+        }
+        return startMeetingRecordingFromEntryPoint(
+            title: title,
+            presentation: .foregroundNotes,
+            startOrigin: .manual,
+            dashboardWindowPresentation: .restored
         )
     }
 

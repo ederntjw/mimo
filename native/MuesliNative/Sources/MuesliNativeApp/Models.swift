@@ -294,6 +294,21 @@ struct BackendOption: Equatable {
         !isStreamingDictationBackend
     }
 
+    var supportsLiveMeetingTranscription: Bool {
+        Self.parakeetFamily.contains(self) || self == .appleSpeechAnalyzer
+    }
+
+    static func resolvedLiveMeetingTranscriptionBackend(
+        configured: BackendOption?,
+        availableOptions: [BackendOption]
+    ) -> BackendOption? {
+        let available = availableOptions.filter(\.supportsLiveMeetingTranscription)
+        if let configured, available.contains(configured) {
+            return configured
+        }
+        return (parakeetFamily + [.appleSpeechAnalyzer]).first { available.contains($0) }
+    }
+
     var isSystemManaged: Bool {
         backend == "apple-speech"
     }

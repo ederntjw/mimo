@@ -29,7 +29,7 @@ enum LiveMeetingSummaryPolicy {
     // Keep the first checkpoint visibly live. The delay starts only after a
     // committed speech chunk arrives, so larger values make short meetings
     // appear as though live summarization is not running at all.
-    static let initialDelay: TimeInterval = 10
+    static let initialDelay: TimeInterval = 12
     static let refreshDelay: TimeInterval = 30
     static let minimumTranscriptCharacters = 120
     static let minimumNewCharacters = 160
@@ -64,17 +64,15 @@ struct LiveMeetingAssistantSection: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: MuesliTheme.spacing12) {
             liveBrief
                 .frame(minHeight: 150, idealHeight: 220, maxHeight: 280)
-
-            Divider()
-                .background(MuesliTheme.surfaceBorder)
 
             conversation
 
             composer
         }
+        .padding(MuesliTheme.spacing16)
         .background(MuesliTheme.backgroundBase)
         .onChange(of: isActive) { _, active in
             questionFieldFocused = active
@@ -86,7 +84,7 @@ struct LiveMeetingAssistantSection: View {
             HStack(spacing: MuesliTheme.spacing8) {
                 Image(systemName: "sparkles")
                     .foregroundStyle(MuesliTheme.accent)
-                Text("Live brief")
+                Text("Live Summary")
                     .font(MuesliTheme.headline())
                     .foregroundStyle(MuesliTheme.textPrimary)
                 Circle()
@@ -108,6 +106,23 @@ struct LiveMeetingAssistantSection: View {
             }
             .padding(.horizontal, MuesliTheme.spacing24)
             .padding(.top, MuesliTheme.spacing16)
+
+            HStack(spacing: MuesliTheme.spacing8) {
+                serviceBadge(
+                    appState.selectedMeetingTranscriptionBackend.label,
+                    systemImage: "waveform.and.mic",
+                    tint: MuesliTheme.success
+                )
+                serviceBadge(
+                    appState.isChatGPTAuthenticated
+                        ? "ChatGPT · GPT-5.4 Mini"
+                        : "ChatGPT sign-in needed · GPT-5.4 Mini",
+                    systemImage: "sparkles",
+                    tint: MuesliTheme.accent
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, MuesliTheme.spacing24)
 
             if appState.liveMeetingSummary.isEmpty {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
@@ -134,6 +149,13 @@ struct LiveMeetingAssistantSection: View {
                     .padding(.bottom, MuesliTheme.spacing8)
             }
         }
+        .background(MuesliTheme.backgroundRaised)
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge, style: .continuous)
+                .strokeBorder(MuesliTheme.accent.opacity(0.22), lineWidth: 1)
+        }
+        .accessibilityIdentifier("meeting.liveSummaryPanel")
     }
 
     private var conversation: some View {
@@ -142,7 +164,11 @@ struct LiveMeetingAssistantSection: View {
                 LazyVStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
                     if appState.liveMeetingAssistantMessages.isEmpty {
                         VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
-                            Text("Ask about the meeting so far")
+                            HStack(spacing: MuesliTheme.spacing8) {
+                                Image(systemName: "bubble.left.and.bubble.right.fill")
+                                    .foregroundStyle(MuesliTheme.accent)
+                                Text("Ask Mimo")
+                            }
                                 .font(MuesliTheme.headline())
                                 .foregroundStyle(MuesliTheme.textPrimary)
                             Text("Try “What did they say about the deadline?” or “Which action items are mine?”")
@@ -185,11 +211,18 @@ struct LiveMeetingAssistantSection: View {
                 scrollToBottom(proxy)
             }
         }
+        .background(MuesliTheme.backgroundRaised)
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium, style: .continuous)
+                .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+        }
+        .accessibilityIdentifier("meeting.askMimoConversation")
     }
 
     private var composer: some View {
         HStack(alignment: .center, spacing: MuesliTheme.spacing8) {
-            TextField("Ask what has already been said…", text: $question)
+            TextField("Ask Mimo about what has already been said…", text: $question)
                 .textFieldStyle(.plain)
                 .focused($questionFieldFocused)
                 .onSubmit(submitQuestion)
@@ -214,8 +247,21 @@ struct LiveMeetingAssistantSection: View {
             RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall)
                 .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
         }
-        .padding(.horizontal, MuesliTheme.spacing24)
-        .padding(.bottom, MuesliTheme.spacing16)
+        .accessibilityIdentifier("meeting.askMimoComposer")
+    }
+
+    private func serviceBadge(_ text: String, systemImage: String, tint: Color) -> some View {
+        Label(text, systemImage: systemImage)
+            .font(MuesliTheme.captionMedium())
+            .foregroundStyle(tint)
+            .padding(.horizontal, MuesliTheme.spacing8)
+            .padding(.vertical, 5)
+            .background(tint.opacity(0.10))
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .strokeBorder(tint.opacity(0.22), lineWidth: 1)
+            }
     }
 
     private func messageBubble(_ message: LiveMeetingAssistantMessage) -> some View {

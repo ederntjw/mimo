@@ -280,6 +280,8 @@ struct MeetingsView: View {
 
                 if let activeLiveMeeting {
                     activeMeetingBanner(activeLiveMeeting)
+                } else if !appState.isMeetingStarting {
+                    liveMeetingStartPanel
                 }
 
                 browserHeader(meetingCount: presentation.meetings.count)
@@ -686,31 +688,6 @@ struct MeetingsView: View {
     private var browserHeaderActions: some View {
         HStack(spacing: MuesliTheme.spacing8) {
             Button {
-                controller.startMeetingRecordingFromEntryPoint(title: "Live Meeting")
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "waveform.and.mic")
-                        .font(.system(size: 11, weight: .semibold))
-                    Text("Start Live Meeting")
-                        .font(.system(size: 12, weight: .semibold))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, MuesliTheme.spacing12)
-                .padding(.vertical, 8)
-                .background(appState.isMeetingRecording || appState.isMeetingStarting ? MuesliTheme.surfacePrimary : MuesliTheme.recording)
-                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
-                .overlay(alignment: .topTrailing) {
-                    MuesliPrimaryActionThemeAccents()
-                        .offset(x: 5, y: -5)
-                }
-            }
-            .buttonStyle(.plain)
-            .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
-            .help("Record and transcribe while a rolling summary and meeting Q&A stay available")
-            .fixedSize()
-
-            Button {
                 controller.startQuickNoteMeeting()
             } label: {
                 HStack(spacing: 6) {
@@ -783,6 +760,115 @@ struct MeetingsView: View {
             .fixedSize()
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var liveMeetingStartPanel: some View {
+        let visualTheme = MuesliVisualTheme.resolved(appState.config.visualTheme)
+        return VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
+            HStack(alignment: .center, spacing: MuesliTheme.spacing16) {
+                MimoApplicationIconView(theme: visualTheme, size: 52)
+                    .overlay(MuesliBrandThemeAccents())
+
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                    Text("Live Meeting")
+                        .font(MuesliTheme.title2())
+                        .foregroundStyle(MuesliTheme.textPrimary)
+                    Text("Follow the conversation as it happens, then ask Mimo without interrupting the recording.")
+                        .font(MuesliTheme.body())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                }
+
+                Spacer(minLength: MuesliTheme.spacing16)
+            }
+
+            HStack(spacing: MuesliTheme.spacing8) {
+                liveMeetingCapability(
+                    "Parakeet / Apple Speech",
+                    detail: "on-device",
+                    systemImage: "waveform.and.mic"
+                )
+                liveMeetingCapability(
+                    "GPT-5.4 Mini",
+                    detail: appState.isChatGPTAuthenticated ? "ChatGPT subscription" : "sign in in Settings",
+                    systemImage: "sparkles"
+                )
+                liveMeetingCapability(
+                    "Ask Mimo",
+                    detail: "recording continues",
+                    systemImage: "bubble.left.and.bubble.right"
+                )
+            }
+
+            Button {
+                controller.startLiveMeetingFromMeetingsView()
+            } label: {
+                HStack(spacing: MuesliTheme.spacing8) {
+                    Image(systemName: "mic.fill")
+                    Text("Start Live Meeting")
+                    Spacer(minLength: MuesliTheme.spacing8)
+                    Image(systemName: "arrow.right")
+                }
+                .font(MuesliTheme.headline())
+                .foregroundStyle(.white)
+                .padding(.horizontal, MuesliTheme.spacing20)
+                .frame(maxWidth: .infinity, minHeight: 50)
+                .background(MuesliTheme.recording)
+                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium, style: .continuous))
+                .overlay(alignment: .topTrailing) {
+                    MuesliPrimaryActionThemeAccents()
+                        .offset(x: -4, y: 2)
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+            .help("Open Live Summary and begin local transcription")
+            .accessibilityIdentifier("meetings.startLiveMeetingButton")
+        }
+        .padding(MuesliTheme.spacing20)
+        .background(
+            LinearGradient(
+                colors: [MuesliTheme.surfaceSelected.opacity(0.74), MuesliTheme.backgroundRaised],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge, style: .continuous)
+                .strokeBorder(MuesliTheme.accent.opacity(0.24), lineWidth: 1)
+        }
+        .shadow(color: MuesliTheme.accent.opacity(0.10), radius: 16, y: 6)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("meetings.liveMeetingStartPanel")
+    }
+
+    private func liveMeetingCapability(
+        _ title: String,
+        detail: String,
+        systemImage: String
+    ) -> some View {
+        HStack(spacing: MuesliTheme.spacing8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MuesliTheme.accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title)
+                    .font(MuesliTheme.captionMedium())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                Text(detail)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textTertiary)
+            }
+        }
+        .padding(.horizontal, MuesliTheme.spacing12)
+        .padding(.vertical, MuesliTheme.spacing8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MuesliTheme.surfacePrimary.opacity(0.78))
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall, style: .continuous)
+                .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+        }
     }
 
     @ViewBuilder

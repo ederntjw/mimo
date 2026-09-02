@@ -12,6 +12,12 @@ private enum RecordingContentMode: Hashable {
     case assistant
 }
 
+enum LiveMeetingWorkspacePolicy {
+    static func opensLiveSummary(for status: MeetingStatus) -> Bool {
+        status == .recording
+    }
+}
+
 private enum ManualNotesSaveStatus {
     case saved
     case saving
@@ -136,7 +142,10 @@ struct MeetingDetailView: View {
         _loadedMeetingID = State(initialValue: meeting?.id)
         _pendingTemplateID = State(initialValue: initialTemplateID)
         _documentMode = State(initialValue: meeting.map(Self.defaultDocumentMode(for:)) ?? .notes)
-        _recordingMode = State(initialValue: meeting?.status == .recording ? .assistant : .notes)
+        _recordingMode = State(
+            initialValue: meeting.map { LiveMeetingWorkspacePolicy.opensLiveSummary(for: $0.status) }
+                == true ? .assistant : .notes
+        )
     }
 
     var body: some View {
@@ -1827,7 +1836,8 @@ struct MeetingDetailView: View {
         pendingTemplateID = meeting.map { controller.meetingTemplateSnapshot(for: $0).id } ?? controller.defaultMeetingTemplate().id
         if meetingChanged {
             documentMode = meeting.map(Self.defaultDocumentMode(for:)) ?? .notes
-            recordingMode = meeting?.status == .recording ? .assistant : .notes
+            recordingMode = meeting.map { LiveMeetingWorkspacePolicy.opensLiveSummary(for: $0.status) }
+                == true ? .assistant : .notes
             isEditingNotes = false
             isEditingTranscript = false
             showFolderPopover = false

@@ -83,9 +83,16 @@ enum MuesliTheme {
         visualTheme = MuesliVisualTheme.resolved(rawValue)
     }
 
-    static func applicationIconImage(runtime: RuntimePaths) -> NSImage? {
-        guard let url = runtime.applicationIconURL(for: visualTheme) else { return nil }
+    static func applicationIconImage(
+        for theme: MuesliVisualTheme,
+        runtime: RuntimePaths
+    ) -> NSImage? {
+        guard let url = runtime.applicationIconURL(for: theme) else { return nil }
         return NSImage(contentsOf: url)
+    }
+
+    static func applicationIconImage(runtime: RuntimePaths) -> NSImage? {
+        applicationIconImage(for: visualTheme, runtime: runtime)
     }
 
     @MainActor
@@ -93,6 +100,8 @@ enum MuesliTheme {
     static func applyApplicationIcon(to application: NSApplication, runtime: RuntimePaths) -> Bool {
         guard let image = applicationIconImage(runtime: runtime) else { return false }
         application.applicationIconImage = image
+        application.dockTile.contentView?.needsDisplay = true
+        application.dockTile.display()
         return true
     }
 
@@ -383,6 +392,46 @@ enum MuesliTheme {
         usesCuteStyling
             ? NSColor.adaptive(dark: 0x4A2C3B, light: 0xF8D9E6)
             : NSColor.white.withAlphaComponent(0.12)
+    }
+}
+
+/// Uses the same theme-owned asset as the running Dock tile. Passing the theme
+/// explicitly makes SwiftUI invalidate the brand mark immediately when the
+/// stored selection changes, rather than waiting for a process restart.
+struct MimoApplicationIconView: View {
+    let theme: MuesliVisualTheme
+    let size: CGFloat
+
+    init(theme: MuesliVisualTheme, size: CGFloat = 34) {
+        self.theme = theme
+        self.size = size
+    }
+
+    var body: some View {
+        Group {
+            if let runtime = try? RuntimePaths.resolve(),
+               let image = MuesliTheme.applicationIconImage(for: theme, runtime: runtime) {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+            } else {
+                Image(systemName: theme.icon)
+                    .resizable()
+                    .scaledToFit()
+                    .padding(size * 0.22)
+                    .foregroundStyle(theme.previewAccent)
+                    .background(theme.previewBackground)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: size * 0.22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
+                .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+        }
+        .shadow(color: theme.previewAccent.opacity(0.14), radius: 5, y: 2)
+        .accessibilityHidden(true)
+        .id(theme.rawValue)
     }
 }
 

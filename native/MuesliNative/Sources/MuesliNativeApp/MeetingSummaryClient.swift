@@ -161,6 +161,19 @@ enum MeetingSummaryClient {
         """
     )
 
+    /// Live Meeting is the subscription-backed product path on both iPhone and
+    /// Mac. Keep it deterministic even when the user has chosen another
+    /// provider for post-meeting summaries or transcript cleanup.
+    static let liveMeetingBackend = MeetingSummaryBackendOption.chatGPT.backend
+    static let liveMeetingModel = "gpt-5.4-mini"
+
+    static func liveMeetingConfiguration(from config: AppConfig) -> AppConfig {
+        var liveConfig = config
+        liveConfig.meetingSummaryBackend = liveMeetingBackend
+        liveConfig.chatGPTModel = liveMeetingModel
+        return liveConfig
+    }
+
     private static let titleInstructions = """
     Generate a short, descriptive meeting title (3-7 words) from these transcript excerpts and any written notes. \
     Treat written notes as high-priority context: they may contain the clearest statement of the meeting's topic or outcome. \
@@ -209,10 +222,11 @@ enum MeetingSummaryClient {
         previousDigest: String?,
         config: AppConfig
     ) async throws -> String {
-        try await summarize(
+        let liveConfig = liveMeetingConfiguration(from: config)
+        return try await summarize(
             transcript: transcript,
             meetingTitle: meetingTitle,
-            config: config,
+            config: liveConfig,
             template: liveDigestTemplate,
             existingNotes: previousDigest
         )
@@ -225,10 +239,11 @@ enum MeetingSummaryClient {
         config: AppConfig
     ) async throws -> String {
         let template = liveQuestionTemplate(question: question)
+        let liveConfig = liveMeetingConfiguration(from: config)
         return try await summarize(
             transcript: transcript,
             meetingTitle: meetingTitle,
-            config: config,
+            config: liveConfig,
             template: template
         )
     }

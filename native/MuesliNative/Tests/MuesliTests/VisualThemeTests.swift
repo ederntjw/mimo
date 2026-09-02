@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import SwiftUI
 import Testing
@@ -62,25 +63,41 @@ struct VisualThemeTests {
         #expect(runtime.applicationIconURL(for: .classic) == classicURL)
         #expect(runtime.applicationIconURL(for: .strawberryMilk) == strawberryURL)
 
-        defer { MuesliTheme.apply(visualTheme: MuesliVisualTheme.classic.rawValue) }
+        let application = NSApplication.shared
+        let originalApplicationIcon = application.applicationIconImage
+        defer {
+            MuesliTheme.apply(visualTheme: MuesliVisualTheme.classic.rawValue)
+            application.applicationIconImage = originalApplicationIcon
+        }
         MuesliTheme.apply(visualTheme: MuesliVisualTheme.classic.rawValue)
         let classicImage = try #require(MuesliTheme.applicationIconImage(runtime: runtime))
+        #expect(MuesliTheme.applyApplicationIcon(to: application, runtime: runtime))
+        let classicDockImage = try #require(application.applicationIconImage?.tiffRepresentation)
         MuesliTheme.apply(visualTheme: MuesliVisualTheme.strawberryMilk.rawValue)
         let strawberryImage = try #require(MuesliTheme.applicationIconImage(runtime: runtime))
+        #expect(MuesliTheme.applyApplicationIcon(to: application, runtime: runtime))
+        let strawberryDockImage = try #require(application.applicationIconImage?.tiffRepresentation)
+        let explicitStrawberryImage = try #require(
+            MuesliTheme.applicationIconImage(for: .strawberryMilk, runtime: runtime)
+        )
 
         #expect(classicImage.tiffRepresentation != strawberryImage.tiffRepresentation)
+        #expect(classicDockImage != strawberryDockImage)
+        #expect(explicitStrawberryImage.tiffRepresentation == strawberryImage.tiffRepresentation)
     }
 
-    @Test("Strawberry Milk icon is a full-resolution transparent macOS asset")
+    @Test("Strawberry Milk icon exactly matches the generated iPhone artwork")
     func strawberryApplicationIconAsset() throws {
         let iconURL = repositoryRoot().appendingPathComponent("assets/mimo_strawberry_app_icon.png")
         let data = try Data(contentsOf: iconURL)
         let representation = try #require(NSBitmapImageRep(data: data))
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 
         #expect(representation.pixelsWide == 1024)
         #expect(representation.pixelsHigh == 1024)
-        #expect(representation.hasAlpha)
-        #expect((representation.colorAt(x: 0, y: 0)?.alphaComponent ?? 1) == 0)
+        #expect(!representation.hasAlpha)
+        #expect(digest == "b2446487c271c2b954fa1cf5e3acf558d7a039cfe8837d642ae19eadf4b90b17")
+        #expect((representation.colorAt(x: 0, y: 0)?.alphaComponent ?? 0) == 1)
         #expect((representation.colorAt(x: 512, y: 512)?.alphaComponent ?? 0) == 1)
     }
 
@@ -152,15 +169,15 @@ private struct VisualThemeSnapshotProbe: View {
             }
             .foregroundStyle(MuesliTheme.textPrimary)
 
-            Text("A rendered regression probe for cards, text, status, and the primary action.")
+            Text("Live Summary · GPT-5.4 Mini · recording continues while you Ask Mimo.")
                 .font(MuesliTheme.body())
                 .foregroundStyle(MuesliTheme.textSecondary)
 
             HStack {
-                Label("Recording", systemImage: "record.circle.fill")
-                    .foregroundStyle(MuesliTheme.recording)
+                Label("Local speech", systemImage: "waveform.and.mic")
+                    .foregroundStyle(MuesliTheme.success)
                 Spacer()
-                Text("Ask Mimo")
+                Text("Start Live Meeting")
                     .font(MuesliTheme.captionMedium())
                     .foregroundStyle(.white)
                     .padding(.horizontal, MuesliTheme.spacing12)

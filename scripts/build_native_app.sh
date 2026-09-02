@@ -609,8 +609,9 @@ else
   # Note: ad-hoc signatures have no stable designated requirement, so the cdhash changes on
   # every rebuild and macOS privacy grants must be re-approved after each dev build. For grants
   # that persist across rebuilds, create a self-signed code-signing certificate and pass its name
-  # via MUESLI_SIGN_IDENTITY. No hardened runtime here: ad-hoc has no Team ID, so library
-  # validation would block dlopen of the bundled frameworks/dylibs.
+  # via MUESLI_SIGN_IDENTITY. Keep hardened runtime enabled even for preview/release automation;
+  # MuesliLocalOnly.entitlements disables library validation so the complete ad-hoc-signed local
+  # runtime can still be loaded without a Team ID.
   LOCAL_SIGN_IDENTITY="-"
   if [[ -n "${MUESLI_SIGN_IDENTITY:-}" ]]; then
     LOCAL_SIGN_IDENTITY="$MUESLI_SIGN_IDENTITY"
@@ -631,27 +632,27 @@ else
     # nested executable the framework-level sign doesn't reseal.
     find "$framework" -type f -perm +111 | while read -r binary; do
       if file "$binary" | grep -q "Mach-O"; then
-          codesign --force --sign "$LOCAL_SIGN_IDENTITY" "$binary"
+          codesign --force --options runtime --timestamp=none --sign "$LOCAL_SIGN_IDENTITY" "$binary"
       fi
     done
     find "$framework" \( -name "*.xpc" -o -name "*.app" \) -type d | while read -r nested; do
-      codesign --force --sign "$LOCAL_SIGN_IDENTITY" "$nested"
+      codesign --force --options runtime --timestamp=none --sign "$LOCAL_SIGN_IDENTITY" "$nested"
     done
-    codesign --force --sign "$LOCAL_SIGN_IDENTITY" "$framework"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_SIGN_IDENTITY" "$framework"
   done
 
   find "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Frameworks" -maxdepth 1 \( -name "*.dylib" -o -name "*.so" \) -type f | while read -r library; do
     if file "$library" | grep -q "Mach-O"; then
-      codesign --force --sign "$LOCAL_SIGN_IDENTITY" "$library"
+      codesign --force --options runtime --timestamp=none --sign "$LOCAL_SIGN_IDENTITY" "$library"
     fi
   done
 
   if [[ -f "$APP_DIR/Contents/MacOS/muesli-cli" ]]; then
-    codesign --force --sign "$LOCAL_SIGN_IDENTITY" "$APP_DIR/Contents/MacOS/muesli-cli"
+    codesign --force --options runtime --timestamp=none --sign "$LOCAL_SIGN_IDENTITY" "$APP_DIR/Contents/MacOS/muesli-cli"
   fi
 
   # Sign the bundle last so the Info.plist binding / identity stick.
-  codesign --force --sign "$LOCAL_SIGN_IDENTITY" --entitlements "$ENTITLEMENTS" "$APP_DIR"
+  codesign --force --options runtime --timestamp=none --sign "$LOCAL_SIGN_IDENTITY" --entitlements "$ENTITLEMENTS" "$APP_DIR"
 
   echo "Verifying ad-hoc signature..."
   if ! codesign --verify --deep --strict "$APP_DIR" 2>&1; then

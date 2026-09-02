@@ -1,0 +1,166 @@
+name: Publish Mimo update
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 0.8.6"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mimo-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'ederntjw/mimo'
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      GH_TOKEN: ${{ github.token }}
+      MIMO_SPARKLE_PRIVATE_KEY: ${{ secrets.MIMO_SPARKLE_PRIVATE_KEY }}
+      DISPATCH_VERSION: ${{ inputs.version }}
+      OUTPUT_DIR: dist-mimo-update
+
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve and validate release version
+        id: release
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            tag="${GITHUB_REF_NAME}"
+            version="${tag#v}"
+          else
+            version="${DISPATCH_VERSION}"
+            tag="v${version}"
+          fi
+
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a numeric release version such as 0.8.6, got: $version" >&2
+            exit 2
+          fi
+          if [[ -z "$MIMO_SPARKLE_PRIVATE_KEY" ]]; then
+            echo "Repository secret MIMO_SPARKLE_PRIVATE_KEY is not configured." >&2
+            exit 2
+          fi
+          if [[ ! -f "docs/release-notes/${version}.md" ]]; then
+            echo "Missing docs/release-notes/${version}.md" >&2
+            exit 2
+          fi
+
+          git fetch origin main --quiet
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release commit must already be present on main." >&2
+            exit 2
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Install native build tooling
+        run: brew install xcodegen
+
+      - name: Cache LocalVQE runtime
+        uses: actions/cache@v4
+        with:
+          path: native/MuesliNative/LocalVQE/lib
+          key: mimo-localvqe-${{ runner.os }}-${{ hashFiles('scripts/build_localvqe.sh') }}
+
+      - name: Build the update-enabled Mimo DMG
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          MIMO_DMG_OUTPUT_DIR: ${{ github.workspace }}/dist-mimo-update
+          MUESLI_BUILD_VERSION: ${{ steps.release.outputs.version }}
+          MUESLI_BUNDLE_VERSION: ${{ steps.release.outputs.version }}
+          MUESLI_SHORT_VERSION: ${{ steps.release.outputs.version }}
+        run: ./scripts/build_mimo_dmg.sh
+
+      - name: Generate signed Sparkle appcast
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          dmg="$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg"
+          cp "docs/release-notes/${RELEASE_VERSION}.md" "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.md"
+
+          generate_appcast="$(find "$HOME/Library/Caches/muesli-spm" -type f -path '*/Sparkle/bin/generate_appcast' -print | sed -n '1p')"
+          if [[ -z "$generate_appcast" || ! -x "$generate_appcast" ]]; then
+            echo "Sparkle generate_appcast was not produced by the build." >&2
+            exit 1
+          fi
+
+          printf '%s\n' "$MIMO_SPARKLE_PRIVATE_KEY" | "$generate_appcast" \
+            --ed-key-file - \
+            --download-url-prefix "https://github.com/ederntjw/mimo/releases/download/${RELEASE_TAG}/" \
+            --embed-release-notes \
+            --maximum-versions 1 \
+            --maximum-deltas 0 \
+            -o "$OUTPUT_DIR/appcast.xml" \
+            "$OUTPUT_DIR"
+
+          test -f "$dmg"
+          test -f "$OUTPUT_DIR/appcast.xml"
+
+      - name: Verify the exact Sparkle update artifact
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          ./scripts/verify_update_flow.sh \
+            --version "$RELEASE_VERSION" \
+            --short-version "$RELEASE_VERSION" \
+            --artifact-version "$RELEASE_VERSION" \
+            --appcast "$OUTPUT_DIR/appcast.xml" \
+            --dmg "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg" \
+            --app-name Mimo \
+            --feed-url "https://github.com/ederntjw/mimo/releases/latest/download/appcast.xml" \
+            --github-repository ederntjw/mimo \
+            --release-tag "$RELEASE_TAG" \
+            --require-release-notes
+
+      - name: Publish GitHub release and update feed
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release $RELEASE_TAG already exists; refusing to replace published assets." >&2
+            exit 1
+          fi
+
+          shasum -a 256 "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg" > "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg.sha256"
+          gh release create "$RELEASE_TAG" \
+            "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg#Mimo ${RELEASE_VERSION} DMG" \
+            "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg.sha256#SHA-256 checksum" \
+            "$OUTPUT_DIR/appcast.xml#Sparkle update feed" \
+            --title "Mimo ${RELEASE_VERSION}" \
+            --notes-file "docs/release-notes/${RELEASE_VERSION}.md" \
+            --latest
+
+      - name: Confirm the public latest feed
+        env:
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if curl --fail --location --silent --show-error \
+              "https://github.com/ederntjw/mimo/releases/latest/download/appcast.xml" \
+              | grep -q "<sparkle:version>${RELEASE_VERSION}</sparkle:version>"; then
+              echo "Mimo ${RELEASE_VERSION} is live on the Sparkle feed."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "The release exists, but the latest appcast redirect did not converge in time." >&2
+          exit 1

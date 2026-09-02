@@ -14,6 +14,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source "$ROOT/scripts/localvqe_runtime.sh"
 
 OUTPUT_DIR="${MIMO_DMG_OUTPUT_DIR:-$ROOT/dist-share}"
+SPARKLE_FEED_URL="${MIMO_SPARKLE_FEED_URL:-https://github.com/ederntjw/mimo/releases/latest/download/appcast.xml}"
+SPARKLE_PUBLIC_KEY="${MIMO_SPARKLE_PUBLIC_KEY:-5YCc2MtI+BSleheL65Le6rsFk6Ynw+k+19/KOcc60BY=}"
 USE_XCODE_BUILD="${MUESLI_USE_XCODE_BUILD:-}"
 if [[ -z "$USE_XCODE_BUILD" ]]; then
   if command -v xcodegen >/dev/null 2>&1; then
@@ -35,7 +37,8 @@ BUILD_ENV=(
   MUESLI_EXECUTABLE_NAME=Mimo
   MUESLI_SUPPORT_DIR_NAME=Mimo
   MUESLI_BUNDLE_ID=com.muesli.app
-  MUESLI_SPARKLE_FEED_URL=
+  MUESLI_SPARKLE_FEED_URL="$SPARKLE_FEED_URL"
+  MUESLI_SPARKLE_EDKEY="$SPARKLE_PUBLIC_KEY"
   MUESLI_USE_XCODE_BUILD="$USE_XCODE_BUILD"
 )
 
@@ -58,6 +61,7 @@ MUESLI_SIGN_IDENTITY="$DMG_IDENTITY" "$ROOT/scripts/create_dmg.sh" "/Application
 
 echo
 echo "Mimo DMG ready in: $OUTPUT_DIR"
+echo "Sparkle update feed: $SPARKLE_FEED_URL"
 if [[ "$DMG_IDENTITY" == "-" ]]; then
   echo "This preview DMG is ad-hoc signed and not notarized. Friends may need to right-click Mimo and choose Open once."
 fi

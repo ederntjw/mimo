@@ -79,6 +79,9 @@ jobs:
       - name: Test append-only appcast updates
         run: python3 ./scripts/test_merge_appcast_item.py
 
+      - name: Test Mimo update release contract
+        run: python3 ./scripts/test_mimo_update_flow.py
+
       - name: Test LocalVQE runtime validation
         run: ./scripts/test_localvqe_runtime_validation.sh
 

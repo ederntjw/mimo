@@ -9,6 +9,8 @@ ARTIFACT_VERSION=""
 DMG_PATH=""
 APP_NAME="Muesli"
 EXPECTED_FEED_URL="https://muesli-hq.github.io/muesli/appcast.xml"
+GITHUB_REPOSITORY="Muesli-HQ/muesli"
+RELEASE_TAG=""
 SKIP_DMG=0
 REQUIRE_NOTARIZED=0
 REQUIRE_RELEASE_NOTES=0
@@ -28,6 +30,9 @@ Options:
   --dmg <path>              DMG path. Defaults to dist-release/Muesli-<version>.dmg.
   --app-name <name>         App bundle/update artifact name. Defaults to Muesli.
   --feed-url <url>          Expected SUFeedURL. Defaults to the production appcast.
+  --github-repository <r>   GitHub owner/repository hosting the DMG.
+                            Defaults to Muesli-HQ/muesli.
+  --release-tag <tag>       GitHub release tag. Defaults to v<artifact-version>.
   --skip-dmg                Only validate appcast metadata. Suitable for CI.
   --require-release-notes   Require item-level release notes in the appcast.
   --require-notarized       Also require Gatekeeper/stapler checks for DMG and app.
@@ -65,6 +70,14 @@ while [[ $# -gt 0 ]]; do
       EXPECTED_FEED_URL="${2:?missing value for --feed-url}"
       shift 2
       ;;
+    --github-repository)
+      GITHUB_REPOSITORY="${2:?missing value for --github-repository}"
+      shift 2
+      ;;
+    --release-tag)
+      RELEASE_TAG="${2:?missing value for --release-tag}"
+      shift 2
+      ;;
     --skip-dmg)
       SKIP_DMG=1
       shift
@@ -97,7 +110,7 @@ if [[ ! -f "$APPCAST" ]]; then
   exit 1
 fi
 
-if ! APPCAST_METADATA="$(python3 - "$APPCAST" "$VERSION" "$SHORT_VERSION" "$ARTIFACT_VERSION" "$APP_NAME" "$REQUIRE_RELEASE_NOTES" <<'PY'
+if ! APPCAST_METADATA="$(python3 - "$APPCAST" "$VERSION" "$SHORT_VERSION" "$ARTIFACT_VERSION" "$APP_NAME" "$REQUIRE_RELEASE_NOTES" "$GITHUB_REPOSITORY" "$RELEASE_TAG" <<'PY'
 import base64
 import re
 import shlex
@@ -110,6 +123,8 @@ expected_short_version = sys.argv[3]
 artifact_version = sys.argv[4]
 app_name = sys.argv[5]
 require_release_notes = sys.argv[6] == "1"
+github_repository = sys.argv[7]
+release_tag = sys.argv[8]
 sparkle_ns = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 
 try:
@@ -150,7 +165,8 @@ if not signature:
     raise SystemExit("ERROR: latest appcast enclosure is missing sparkle:edSignature")
 
 expected_artifact_version = artifact_version or version
-expected_url = f"https://github.com/Muesli-HQ/muesli/releases/download/v{expected_artifact_version}/{app_name}-{expected_artifact_version}.dmg"
+effective_release_tag = release_tag or f"v{expected_artifact_version}"
+expected_url = f"https://github.com/{github_repository}/releases/download/{effective_release_tag}/{app_name}-{expected_artifact_version}.dmg"
 if url != expected_url:
     raise SystemExit(f"ERROR: latest appcast URL is {url!r}, expected {expected_url!r}")
 

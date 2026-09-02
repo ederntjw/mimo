@@ -123,6 +123,25 @@ blocks the first launch, Control-click Mimo in Applications and choose **Open**.
 Never bypass a warning for a copy downloaded from somewhere other than this
 repository's release page.
 
+### Updates
+
+Mimo checks for signed updates automatically once per day. You can also choose
+**Check for Updates…** from its menu-bar menu at any time. When a release is
+available, Mimo shows the release notes, downloads the DMG through Sparkle, verifies
+it with Mimo's dedicated EdDSA public key, installs it, and relaunches. An existing
+installation therefore does not need another manual drag to Applications.
+
+Maintainers publish an update from a clean, CI-passing `main` branch with one tag:
+
+```bash
+./scripts/publish_mimo_update.sh 0.8.6
+```
+
+The tag-triggered GitHub workflow builds the native Mac app, signs the update
+metadata using the protected `MIMO_SPARKLE_PRIVATE_KEY` repository secret, verifies
+the exact DMG, creates the GitHub Release, and moves the stable appcast feed to it.
+The private signing key is never committed to this repository.
+
 ### Requirements
 
 - Apple Silicon Mac

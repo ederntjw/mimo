@@ -802,11 +802,16 @@ struct MeetingsView: View {
             Button {
                 controller.startLiveMeetingFromMeetingsView()
             } label: {
-                HStack(spacing: MuesliTheme.spacing8) {
-                    Image(systemName: "mic.fill")
-                    Text("Start Live Meeting")
-                    Spacer(minLength: MuesliTheme.spacing8)
-                    Image(systemName: "arrow.right")
+                ZStack {
+                    HStack(spacing: MuesliTheme.spacing8) {
+                        Image(systemName: "mic.fill")
+                        Text("Start Live Meeting")
+                    }
+
+                    HStack {
+                        Spacer(minLength: 0)
+                        Image(systemName: "arrow.right")
+                    }
                 }
                 .font(MuesliTheme.headline())
                 .foregroundStyle(.white)
@@ -824,6 +829,7 @@ struct MeetingsView: View {
             .help("Open Live Summary and begin local transcription")
             .accessibilityIdentifier("meetings.startLiveMeetingButton")
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MuesliTheme.spacing20)
         .background(
             LinearGradient(

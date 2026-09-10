@@ -37,7 +37,6 @@ jobs:
       MIMO_NOTARY_TEAM_ID: ${{ secrets.MIMO_NOTARY_TEAM_ID }}
       DISPATCH_VERSION: ${{ inputs.version }}
       OUTPUT_DIR: dist-mimo-update
-      MIMO_PACKAGE_WORK_ROOT: ${{ runner.temp }}/mimo-package-work
       MUESLI_DMG_CONFIGURE_FINDER: "0"
 
     steps:
@@ -147,6 +146,7 @@ jobs:
 
       - name: Build the update-enabled Mimo DMG
         env:
+          MIMO_PACKAGE_WORK_ROOT: ${{ runner.temp }}/mimo-package-work
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           MIMO_DMG_OUTPUT_DIR: ${{ github.workspace }}/dist-mimo-update
           MUESLI_BUILD_VERSION: ${{ steps.release.outputs.version }}
@@ -226,6 +226,8 @@ jobs:
       - name: Prepare safe notarization recovery receipts
         id: notary_receipts
         if: failure() || cancelled()
+        env:
+          MIMO_PACKAGE_WORK_ROOT: ${{ runner.temp }}/mimo-package-work
         run: |
           python3 - <<'PYTHON'
           import hashlib, json, os, pathlib, re, shutil, uuid

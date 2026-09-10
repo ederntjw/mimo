@@ -3,6 +3,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 import textwrap
@@ -86,6 +87,24 @@ class MimoUpdateFlowTests(unittest.TestCase):
         self.assertIn("name: mimo-notarization-recovery-", recovery)
         self.assertIn("retention-days: 3", recovery)
         self.assertNotIn("mimo-package-work", recovery)
+
+    def test_release_job_environment_uses_only_contexts_available_before_runner_assignment(self) -> None:
+        workflow = (ROOT / ".github/workflows/mimo-release.yml").read_text(encoding="utf-8")
+        job_environment = workflow.split("    env:\n", 1)[1].split("\n    steps:", 1)[0]
+        # GitHub validates job env before selecting a runner. A valid YAML
+        # document can still be rejected here without creating any jobs.
+        # https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability
+        allowed = {"github", "needs", "strategy", "matrix", "vars", "secrets", "inputs"}
+        expressions = re.findall(r"\$\{\{(.*?)\}\}", job_environment)
+        self.assertTrue(expressions)
+        for expression in expressions:
+            contexts = set(re.findall(r"(?<![\w.])([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.|\[)", expression))
+            self.assertTrue(contexts <= allowed, f"Job env uses unavailable contexts: {contexts - allowed}")
+        self.assertNotIn("MIMO_PACKAGE_WORK_ROOT", job_environment)
+        for name in ["Build the update-enabled Mimo DMG", "Prepare safe notarization recovery receipts"]:
+            step = workflow.split(f"      - name: {name}\n", 1)[1].split("\n      - name:", 1)[0]
+            environment = step.split("        env:\n", 1)[1].split("        run:", 1)[0]
+            self.assertIn("MIMO_PACKAGE_WORK_ROOT: ${{ runner.temp }}/mimo-package-work", environment)
 
     def test_failure_receipts_keep_hash_status_and_exclude_sensitive_raw_output(self) -> None:
         workflow = (ROOT / ".github/workflows/mimo-release.yml").read_text(encoding="utf-8")

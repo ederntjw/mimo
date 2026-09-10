@@ -331,7 +331,7 @@ struct BackendOptionTests {
     func speechDiscoveryPreservesCompatibility() {
         let catalog = BackendOption.catalog(appleSpeechAvailable: false)
         #expect(catalog.discovery == [
-            .senseVoiceSmall, .whisperLargeTurbo, .parakeetUnified,
+            .senseVoiceSmall, .whisperLargeV3, .whisperLargeTurbo, .parakeetUnified,
             .parakeetMultilingual, .nemotron35Multilingual,
         ])
         #expect(BackendOption.catalog(appleSpeechAvailable: true).discovery.contains(.appleSpeechAnalyzer))
@@ -452,6 +452,7 @@ struct BackendOptionTests {
         #expect(BackendOption.whisperSmall.model == "small")
         #expect(BackendOption.whisperSmallEnglish.model == "small.en")
         #expect(BackendOption.whisperMediumEnglish.model == "medium.en")
+        #expect(BackendOption.whisperLargeV3.model == "large-v3")
         #expect(BackendOption.whisperLargeTurbo.model.contains("large"))
     }
 
@@ -460,11 +461,12 @@ struct BackendOptionTests {
         #expect(BackendOption.whisperFamily == [
             .whisperTiny, .whisperTinyEnglish,
             .whisperSmall, .whisperSmallEnglish,
-            .whisperMediumEnglish, .whisperLargeTurbo,
+            .whisperMediumEnglish, .whisperLargeTurbo, .whisperLargeV3,
         ])
         #expect(BackendOption.resolve(backend: "whisper", model: "tiny.en") == .whisperTinyEnglish)
         #expect(BackendOption.resolve(backend: "whisper", model: "small.en") == .whisperSmallEnglish)
         #expect(BackendOption.resolve(backend: "whisper", model: "medium.en") == .whisperMediumEnglish)
+        #expect(BackendOption.resolve(backend: "whisper", model: "large-v3") == .whisperLargeV3)
     }
 
     @Test("resolveDownloaded falls back when an English-only selection is not downloaded")

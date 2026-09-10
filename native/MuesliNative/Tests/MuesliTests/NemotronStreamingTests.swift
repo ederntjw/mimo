@@ -855,6 +855,12 @@ struct Nemotron35BackendMetadataTests {
         #expect(desc.contains("Mandarin Chinese and English"))
         #expect(desc.contains("punctuation"))
         #expect(desc.contains("does not go back to correct"))
+        let guidance = BackendOption.nemotron35Multilingual.speechGuidance
+        #expect(guidance.bestFor.contains("hold-to-talk"))
+        #expect(guidance.bestFor.contains("hands-free"))
+        #expect(guidance.limitation.contains("punctuation"))
+        #expect(guidance.limitation.contains("does not go back to correct"))
+        #expect(guidance.switchingSummary.contains("has not been verified"))
     }
 
     @Test("nemotron35 backend identifier is nemotron35")

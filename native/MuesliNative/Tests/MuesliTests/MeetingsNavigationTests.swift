@@ -111,6 +111,29 @@ struct MeetingsNavigationTests {
         )
     }
 
+    /// Model-routing fixtures must never consult the maintainer's account or database.
+    private func makeIsolatedTranscriptionController() throws -> MuesliController {
+        let supportDirectory = makeSupportDirectory()
+        return MuesliController(
+            runtime: RuntimePaths(
+                repoRoot: FileManager.default.temporaryDirectory,
+                menuIcon: nil, appIcon: nil, bundlePath: nil
+            ),
+            dictationStore: try makeStore(),
+            configStore: ConfigStore(supportDirectory: supportDirectory),
+            chatGPTAuth: ChatGPTAuthManager(
+                tokenFileURL: supportDirectory.appendingPathComponent("chatgpt-auth.json"),
+                migrateLegacyKeychain: false
+            ),
+            openRouterAuth: OpenRouterAuthManager(
+                credentialStore: OpenRouterCredentialStore(supportDirectory: supportDirectory),
+                loadData: { _ in throw URLError(.unsupportedURL) },
+                openURL: { _ in false },
+                environment: { [:] }
+            )
+        )
+    }
+
     private func makeStore() throws -> DictationStore {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("muesli-nav-test-\(UUID().uuidString).db")
@@ -1302,9 +1325,10 @@ struct MeetingsNavigationTests {
         #expect(controller.config.customMeetingTemplates.isEmpty)
     }
 
-    @Test("meeting transcription backend selection is independent from dictation backend")
-    func meetingTranscriptionBackendSelectionIsIndependent() {
-        let controller = makeController()
+    @Test("single-pass meeting transcription selection is independent from dictation backend")
+    func meetingTranscriptionBackendSelectionIsIndependent() throws {
+        let controller = try makeIsolatedTranscriptionController()
+        controller.updateConfig { $0.meetingFinalPassEnabled = false }
 
         controller.selectBackend(.parakeetEnglish)
         controller.selectMeetingTranscriptionBackend(.whisperLargeTurbo, requireDownloaded: false)
@@ -1313,6 +1337,31 @@ struct MeetingsNavigationTests {
         #expect(controller.appState.selectedMeetingTranscriptionBackend == .whisperLargeTurbo)
         #expect(controller.appState.config.sttModel == BackendOption.parakeetEnglish.model)
         #expect(controller.appState.config.meetingTranscriptionModel == BackendOption.whisperLargeTurbo.model)
+    }
+
+    @Test("reviewed meetings keep SenseVoice live and independently select the final model")
+    func reviewedMeetingSelectionKeepsLiveAndFinalRoles() throws {
+        let controller = try makeIsolatedTranscriptionController()
+        controller.updateConfig {
+            $0.meetingFinalPassEnabled = true
+            $0.meetingTranscriptionBackend = BackendOption.parakeetEnglish.backend
+            $0.meetingTranscriptionModel = BackendOption.parakeetEnglish.model
+        }
+        let dictationModel = controller.config.sttModel
+        #expect(controller.config.resolvedMeetingFinalBackend == .whisperLargeV3)
+        #expect(controller.appState.selectedMeetingTranscriptionBackend == .senseVoiceSmall)
+
+        // The legacy selector cannot replace the live role or overwrite the saved one-pass choice.
+        controller.selectMeetingTranscriptionBackend(.whisperLargeTurbo, requireDownloaded: false)
+        controller.selectMeetingFinalTranscriptionBackend(.whisperLargeTurbo)
+
+        #expect(controller.appState.selectedMeetingTranscriptionBackend == .senseVoiceSmall)
+        #expect(controller.config.meetingTranscriptionModel == BackendOption.parakeetEnglish.model)
+        #expect(controller.config.resolvedMeetingFinalBackend == .whisperLargeTurbo)
+        #expect(controller.appState.config.meetingFinalTranscriptionModel == BackendOption.whisperLargeTurbo.model)
+        #expect(controller.config.sttModel == dictationModel)
+        #expect(!controller.appState.isChatGPTAuthenticated)
+        #expect(!controller.appState.isOpenRouterAuthenticated)
     }
 
     @Test("selecting Gemma dictation replaces conflicting Gemma cleanup")
@@ -1656,9 +1705,9 @@ struct MeetingsNavigationTests {
         #expect(controller.selectedBackend == .gemma4E2BLiteRT)
     }
 
-    @Test("updateConfig persists normalized meeting transcription backend")
-    func updateConfigPersistsNormalizedMeetingTranscriptionBackend() {
-        let controller = makeController()
+    @Test("updateConfig persists normalized single-pass meeting transcription backend")
+    func updateConfigPersistsNormalizedMeetingTranscriptionBackend() throws {
+        let controller = try makeIsolatedTranscriptionController()
         let originalConfig = controller.config
         defer {
             controller.updateConfig { config in
@@ -1667,6 +1716,7 @@ struct MeetingsNavigationTests {
         }
 
         controller.updateConfig {
+            $0.meetingFinalPassEnabled = false
             $0.sttBackend = BackendOption.parakeetMultilingual.backend
             $0.sttModel = BackendOption.parakeetMultilingual.model
             $0.meetingTranscriptionBackend = BackendOption.nemotron35Multilingual.backend

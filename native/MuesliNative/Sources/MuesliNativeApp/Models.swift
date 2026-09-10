@@ -113,7 +113,7 @@ struct BackendOption: Equatable {
         model: "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML",
         label: "Nemotron 3.5 Multilingual",
         sizeLabel: "~665 MB",
-        description: "Live text in 32 supported locales, including Mandarin Chinese and English. Auto-detection identifies utterance languages; reliable switching within a sentence has not been verified in Mimo. Use Chinese + English meeting mode with SenseVoice for mixed-language segments.",
+        description: "Live text for hold-to-talk or hands-free dictation, with native punctuation. The streaming model does not go back to correct earlier words. Available in 32 supported locales, including Mandarin Chinese and English. Auto-detection identifies utterance languages; reliable switching within a sentence has not been verified in Mimo. Reviewed meetings use SenseVoice for mixed-language live text.",
         recommended: false
     )
 

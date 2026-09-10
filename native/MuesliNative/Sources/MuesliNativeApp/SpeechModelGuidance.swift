@@ -85,8 +85,8 @@ extension BackendOption {
             details = (SpeechLanguageLists.nemotron35,
                        "28 languages across 32 locales, including Mandarin Chinese and English", .automaticDetection,
                        "Auto-detection identifies utterance languages. Reliable switching within a sentence has not been verified in Mimo.",
-                       "Live text while speaking, with automatic language detection.",
-                       "Draft words can be wrong. Use Chinese + English meeting mode with SenseVoice for mixed-language segments. Mandarin belongs to the model's lower-accuracy coverage tier.")
+                       "Live text for hold-to-talk or hands-free dictation, with automatic language detection.",
+                       "Includes native punctuation, but streaming does not go back to correct earlier words. Mandarin belongs to the model's lower-accuracy coverage tier. Reviewed meetings use SenseVoice for mixed-language live text.")
         case "cohere":
             // Publisher explicitly documents inconsistent code-switched audio.
             // https://huggingface.co/CohereLabs/cohere-transcribe-03-2026

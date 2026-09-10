@@ -416,7 +416,7 @@ public final class MuesliController: NSObject {
     private let meetingNotification = MeetingNotificationController()
     private let meetingSourceWindowLocator = MeetingSourceWindowLocator()
 
-    private let chatGPTAuth = ChatGPTAuthManager.shared
+    private let chatGPTAuth: ChatGPTAuthManager
     private let openRouterAuth: OpenRouterAuthManager
     private let openRouterModelCatalogClient: OpenRouterModelCatalogClient
     private let googleCalAuth = GoogleCalendarAuthManager.shared
@@ -586,11 +586,13 @@ public final class MuesliController: NSObject {
         launchAtLoginManager: LaunchAtLoginManaging = SystemLaunchAtLoginManager(),
         audioDuckingController: AudioDuckingManaging = AudioDuckingController(),
         dictationAudioRoutingController: DictationAudioRouting = DictationAudioRouteController(),
+        chatGPTAuth: ChatGPTAuthManager? = nil,
         openRouterAuth: OpenRouterAuthManager? = nil,
         openRouterModelCatalogClient: OpenRouterModelCatalogClient = OpenRouterModelCatalogClient(),
         mimoAccountAPI: (any MimoAccountAPIProtocol)? = nil
     ) {
         self.configStore = configStore
+        self.chatGPTAuth = chatGPTAuth ?? .shared
         self.openRouterAuth = openRouterAuth ?? .shared
         self.openRouterModelCatalogClient = openRouterModelCatalogClient
         var loadedConfig = configStore.load()

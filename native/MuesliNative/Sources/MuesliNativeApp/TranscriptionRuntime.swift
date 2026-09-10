@@ -117,9 +117,9 @@ actor TranscriptionCoordinator {
         "whisper", "nemotron35", "parakeet-unified", "qwen", "cohere", "indicasr", "sensevoice", "gemma4-litert", "apple-speech",
     ]
 
-    private let fluidTranscriber = FluidAudioTranscriber()
+    private let fluidTranscriber: FluidAudioTranscriber
     private let parakeetUnifiedTranscriber = ParakeetUnifiedTranscriber()
-    private let whisperTranscriber = WhisperKitTranscriber()
+    private let whisperTranscriber: WhisperKitTranscriber
     private var _qwen3Transcriber: Any?
     private var _qwen3PostProcessor: Any?
     private var _cohereTranscriber: Any?
@@ -143,6 +143,8 @@ actor TranscriptionCoordinator {
     private var activeBackend: String?
 
     init(
+        whisperTranscriber: WhisperKitTranscriber = WhisperKitTranscriber(),
+        fluidTranscriber: FluidAudioTranscriber = FluidAudioTranscriber(),
         diarizerModelLoader: @escaping DiarizerModelLoader = { policy in
             try await DiarizerModels.download(configuration: policy.modelConfiguration)
         },
@@ -150,6 +152,8 @@ actor TranscriptionCoordinator {
         diarizerLoadOperationTimeout: Duration = TranscriptionCoordinator.defaultDiarizerLoadOperationTimeout,
         diarizerDiagnostics: DiarizerPreloadDiagnostics = DiarizerPreloadDiagnostics()
     ) {
+        self.whisperTranscriber = whisperTranscriber
+        self.fluidTranscriber = fluidTranscriber
         self.diarizerModelLoader = diarizerModelLoader
         self.vadLoader = vadLoader
         self.diarizerLoadOperationTimeout = diarizerLoadOperationTimeout
@@ -583,7 +587,7 @@ actor TranscriptionCoordinator {
             )
             progress?(0.9, warming.message)
             progressSnapshot?(warming)
-            try await whisperTranscriber.warmup()
+            try await whisperTranscriber.warmup(modelName: backend.model)
             fputs("[muesli-native] WhisperKit warmup complete\n", stderr)
             progress?(1.0, nil)
             progressSnapshot?(warming.replacing(phase: .ready, message: "Model ready"))
@@ -969,7 +973,8 @@ actor TranscriptionCoordinator {
         whisperLanguage: WhisperKitLanguage = WhisperKitLanguage.defaultLanguage,
         qwen3AsrLanguage: Qwen3AsrLanguage = Qwen3AsrLanguage.defaultLanguage,
         parakeetLanguage: ParakeetLanguage = ParakeetLanguage.defaultLanguage,
-        appleSpeechLanguage: String = AppleSpeechLanguageOption.systemIdentifier
+        appleSpeechLanguage: String = AppleSpeechLanguageOption.systemIdentifier,
+        nemotron35Language: Nemotron35Language? = nil
     ) async throws -> SpeechTranscriptionResult {
         // Meetings intentionally skip Qwen/custom-word post-processing. Keep deterministic artifact/filler cleanup only.
         cleanMeetingTranscript(try await route(
@@ -980,7 +985,8 @@ actor TranscriptionCoordinator {
             whisperLanguage: whisperLanguage,
             qwen3AsrLanguage: qwen3AsrLanguage,
             parakeetLanguage: parakeetLanguage,
-            appleSpeechLanguage: appleSpeechLanguage
+            appleSpeechLanguage: appleSpeechLanguage,
+            nemotron35Language: nemotron35Language
         ))
     }
 
@@ -992,7 +998,8 @@ actor TranscriptionCoordinator {
         whisperLanguage: WhisperKitLanguage = WhisperKitLanguage.defaultLanguage,
         qwen3AsrLanguage: Qwen3AsrLanguage = Qwen3AsrLanguage.defaultLanguage,
         parakeetLanguage: ParakeetLanguage = ParakeetLanguage.defaultLanguage,
-        appleSpeechLanguage: String = AppleSpeechLanguageOption.systemIdentifier
+        appleSpeechLanguage: String = AppleSpeechLanguageOption.systemIdentifier,
+        nemotron35Language: Nemotron35Language? = nil
     ) async throws -> SpeechTranscriptionResult {
         // Meeting chunks intentionally skip Qwen/custom-word post-processing for reconciliation.
         // Run VAD to skip silent chunks (prevents hallucinations)
@@ -1016,7 +1023,9 @@ actor TranscriptionCoordinator {
             whisperLanguage: whisperLanguage,
             qwen3AsrLanguage: qwen3AsrLanguage,
             parakeetLanguage: parakeetLanguage,
-            appleSpeechLanguage: appleSpeechLanguage
+            appleSpeechLanguage: appleSpeechLanguage,
+            nemotron35Language: nemotron35Language,
+            preferLowLatency: true
         ))
     }
 
@@ -1355,16 +1364,20 @@ actor TranscriptionCoordinator {
         whisperLanguage: WhisperKitLanguage,
         qwen3AsrLanguage: Qwen3AsrLanguage,
         parakeetLanguage: ParakeetLanguage,
-        appleSpeechLanguage: String
+        appleSpeechLanguage: String,
+        nemotron35Language: Nemotron35Language? = nil,
+        preferLowLatency: Bool = false
     ) async throws -> SpeechTranscriptionResult {
         switch backend.backend {
         case "whisper":
             let language = backend.supportsWhisperLanguageSelection
                 ? whisperLanguage
                 : WhisperKitLanguage.defaultLanguage
-            return try await transcribeWithWhisperKit(url: url, language: language)
+            return try await transcribeWithWhisperKit(
+                url: url, modelName: backend.model, language: language, preferLowLatency: preferLowLatency
+            )
         case "nemotron35":
-            return try await transcribeWithNemotron35(url: url)
+            return try await transcribeWithNemotron35(url: url, language: nemotron35Language)
         case "parakeet-unified":
             return try await transcribeWithParakeetUnified(url: url)
         case "qwen":
@@ -1385,16 +1398,21 @@ actor TranscriptionCoordinator {
                 )
             }
             throw AppleSpeechAnalyzerError.unavailable
+        case "fluidaudio":
+            let version: AsrModelVersion = backend.model.contains("v2") ? .v2 : .v3
+            return try await transcribeWithFluidAudio(url: url, version: version, language: parakeetLanguage)
         default:
-            return try await transcribeWithFluidAudio(url: url, language: parakeetLanguage)
+            throw NSError(domain: "MuesliTranscriptionRuntime", code: 5, userInfo: [
+                NSLocalizedDescriptionKey: "Unknown transcription backend: \(backend.backend)",
+            ])
         }
     }
 
     // MARK: - FluidAudio (Parakeet on ANE)
 
-    private func transcribeWithFluidAudio(url: URL, language: ParakeetLanguage) async throws -> SpeechTranscriptionResult {
-        fputs("[muesli-native] transcribing with FluidAudio: \(url.lastPathComponent)\n", stderr)
-        let result = try await fluidTranscriber.transcribe(wavURL: url, language: language.isoCode)
+    private func transcribeWithFluidAudio(url: URL, version: AsrModelVersion, language: ParakeetLanguage) async throws -> SpeechTranscriptionResult {
+        fputs("[muesli-native] transcribing with FluidAudio \(version): \(url.lastPathComponent)\n", stderr)
+        let result = try await fluidTranscriber.transcribe(wavURL: url, version: version, language: language.isoCode)
         fputs("[muesli-native] FluidAudio result: \(result.text.prefix(80)) (took \(String(format: "%.3f", result.processingTime))s)\n", stderr)
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         let segments = (result.tokenTimings ?? []).map { timing in
@@ -1423,15 +1441,20 @@ actor TranscriptionCoordinator {
 
     private func transcribeWithWhisperKit(
         url: URL,
-        language: WhisperKitLanguage
+        modelName: String,
+        language: WhisperKitLanguage,
+        preferLowLatency: Bool = false
     ) async throws -> SpeechTranscriptionResult {
-        fputs("[muesli-native] transcribing with WhisperKit: \(url.lastPathComponent)\n", stderr)
-        let result = try await whisperTranscriber.transcribe(wavURL: url, language: language)
+        fputs("[muesli-native] transcribing with WhisperKit \(modelName): \(url.lastPathComponent)\n", stderr)
+        let result = try await whisperTranscriber.transcribe(
+            wavURL: url, modelName: modelName, language: language, preferLowLatency: preferLowLatency
+        )
         fputs("[muesli-native] WhisperKit result: \(result.text.prefix(80)) (took \(String(format: "%.3f", result.processingTime))s)\n", stderr)
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         return SpeechTranscriptionResult(
             text: text,
-            segments: text.isEmpty ? [] : [SpeechSegment(start: 0, end: 0, text: text)]
+            segments: text.isEmpty ? [] : (result.segments.isEmpty
+                ? [SpeechSegment(start: 0, end: 0, text: text)] : result.segments)
         )
     }
 
@@ -1536,11 +1559,11 @@ actor TranscriptionCoordinator {
 
     // MARK: - Nemotron 3.5 Streaming (RNNT CoreML on ANE)
 
-    private func transcribeWithNemotron35(url: URL) async throws -> SpeechTranscriptionResult {
+    private func transcribeWithNemotron35(url: URL, language: Nemotron35Language?) async throws -> SpeechTranscriptionResult {
         if #available(macOS 15, *) {
             fputs("[muesli-native] transcribing with Nemotron 3.5: \(url.lastPathComponent)\n", stderr)
             let transcriber = try await getLoadedNemotron35Transcriber()
-            let result = try await transcriber.transcribe(wavURL: url)
+            let result = try await transcriber.transcribe(wavURL: url, promptId: language?.promptId)
             fputs("[muesli-native] Nemotron 3.5 result: \(result.text.prefix(80)) (took \(String(format: "%.3f", result.processingTime))s)\n", stderr)
             let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
             return SpeechTranscriptionResult(

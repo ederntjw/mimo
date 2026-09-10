@@ -8,25 +8,37 @@ import Testing
 @Suite("Visual theme", .serialized)
 @MainActor
 struct VisualThemeTests {
-    @Test("Classic is the persisted default and Strawberry Milk keeps its stable raw value")
+    @Test("Theme identifiers are stable and Classic remains the persisted default")
     func stableValuesAndDefault() {
         #expect(AppConfig().visualTheme == MuesliVisualTheme.classic.rawValue)
         #expect(MuesliVisualTheme.strawberryMilk.rawValue == "strawberryMilk")
+        #expect(MuesliVisualTheme.cherryRibbon.rawValue == "cherryRibbon")
+        #expect(MuesliVisualTheme.lavenderDream.rawValue == "lavenderDream")
+        #expect(MuesliVisualTheme.peachSorbet.rawValue == "peachSorbet")
+        #expect(MuesliVisualTheme.mintMacaron.rawValue == "mintMacaron")
+        #expect(MuesliVisualTheme.roseQuartz.rawValue == "roseQuartz")
+        #expect(MuesliVisualTheme.neonGrid.rawValue == "neonGrid")
+        #expect(MuesliVisualTheme.auroraGlass.rawValue == "auroraGlass")
+        #expect(MuesliVisualTheme.solarFlare.rawValue == "solarFlare")
+        #expect(MuesliVisualTheme.allCases.count == 10)
+        #expect(MuesliVisualTheme.allCases.filter(\.usesCuteStyling).count == 6)
         #expect(MuesliVisualTheme.resolved(nil) == .classic)
         #expect(MuesliVisualTheme.resolved("unknown-future-theme") == .classic)
     }
 
-    @Test("Theme selection round-trips through local config JSON")
+    @Test("Every theme selection round-trips through local config JSON")
     func configPersistenceRoundTrip() throws {
-        var config = AppConfig()
-        config.visualTheme = MuesliVisualTheme.strawberryMilk.rawValue
+        for theme in MuesliVisualTheme.allCases {
+            var config = AppConfig()
+            config.visualTheme = theme.rawValue
 
-        let data = try JSONEncoder().encode(config)
-        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(object["visual_theme"] as? String == "strawberryMilk")
+            let data = try JSONEncoder().encode(config)
+            let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            #expect(object["visual_theme"] as? String == theme.rawValue)
 
-        let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
-        #expect(decoded.visualTheme == "strawberryMilk")
+            let decoded = try JSONDecoder().decode(AppConfig.self, from: data)
+            #expect(decoded.visualTheme == theme.rawValue)
+        }
     }
 
     @Test("Unknown stored themes migrate safely to Classic")
@@ -36,12 +48,20 @@ struct VisualThemeTests {
         #expect(decoded.visualTheme == MuesliVisualTheme.classic.rawValue)
     }
 
-    @Test("Strawberry Milk selects Pink once and Classic preserves the current accent")
+    @Test("Styled themes select their matching accent once and Classic preserves the current accent")
     func accentSelectionPolicy() {
         #expect(
             MuesliVisualTheme.strawberryMilk.accentHex(afterSelecting: "2563eb")
                 == MuesliTheme.pinkAccentPresetHex
         )
+        #expect(MuesliVisualTheme.cherryRibbon.accentHex(afterSelecting: "2563eb") == "c81e43")
+        #expect(MuesliVisualTheme.lavenderDream.accentHex(afterSelecting: "2563eb") == "7652b8")
+        #expect(MuesliVisualTheme.peachSorbet.accentHex(afterSelecting: "2563eb") == "c94f35")
+        #expect(MuesliVisualTheme.mintMacaron.accentHex(afterSelecting: "2563eb") == "a92f5b")
+        #expect(MuesliVisualTheme.roseQuartz.accentHex(afterSelecting: "2563eb") == "a83b6a")
+        #expect(MuesliVisualTheme.neonGrid.accentHex(afterSelecting: "2563eb") == "08788f")
+        #expect(MuesliVisualTheme.auroraGlass.accentHex(afterSelecting: "2563eb") == "08766e")
+        #expect(MuesliVisualTheme.solarFlare.accentHex(afterSelecting: "2563eb") == "c84a0b")
         #expect(MuesliVisualTheme.classic.accentHex(afterSelecting: "8b5cf6") == "8b5cf6")
     }
 
@@ -62,6 +82,14 @@ struct VisualThemeTests {
         #expect(MuesliVisualTheme.strawberryMilk.applicationIconFilename == "mimo_strawberry_app_icon.png")
         #expect(runtime.applicationIconURL(for: .classic) == classicURL)
         #expect(runtime.applicationIconURL(for: .strawberryMilk) == strawberryURL)
+        #expect(runtime.applicationIconURL(for: .cherryRibbon) == classicURL)
+        #expect(runtime.applicationIconURL(for: .lavenderDream) == classicURL)
+        #expect(runtime.applicationIconURL(for: .peachSorbet) == classicURL)
+        #expect(runtime.applicationIconURL(for: .mintMacaron) == classicURL)
+        #expect(runtime.applicationIconURL(for: .roseQuartz) == classicURL)
+        #expect(runtime.applicationIconURL(for: .neonGrid) == classicURL)
+        #expect(runtime.applicationIconURL(for: .auroraGlass) == classicURL)
+        #expect(runtime.applicationIconURL(for: .solarFlare) == classicURL)
 
         let application = NSApplication.shared
         let originalApplicationIcon = application.applicationIconImage
@@ -101,23 +129,23 @@ struct VisualThemeTests {
         #expect((representation.colorAt(x: 512, y: 512)?.alphaComponent ?? 0) == 1)
     }
 
-    @Test("Live switching updates the rendered theme snapshot without restarting")
+    @Test("Live switching renders every palette distinctly without restarting")
     func liveSwitchScreenshotRegression() throws {
         defer {
             MuesliTheme.apply(visualTheme: MuesliVisualTheme.classic.rawValue)
             MuesliTheme.accentOverrideHex = nil
         }
 
-        MuesliTheme.accentOverrideHex = MuesliTheme.pinkAccentPresetHex
-        MuesliTheme.apply(visualTheme: MuesliVisualTheme.classic.rawValue)
-        let classicSnapshot = try snapshotPNG()
+        let snapshots = try MuesliVisualTheme.allCases.map { theme in
+            MuesliTheme.apply(visualTheme: theme.rawValue)
+            MuesliTheme.accentOverrideHex = theme.accentHex(afterSelecting: "2563eb")
+            return try snapshotPNG()
+        }
+
+        #expect(snapshots.allSatisfy { !$0.isEmpty })
+        #expect(Set(snapshots).count == MuesliVisualTheme.allCases.count)
 
         MuesliTheme.apply(visualTheme: MuesliVisualTheme.strawberryMilk.rawValue)
-        let strawberrySnapshot = try snapshotPNG()
-
-        #expect(!classicSnapshot.isEmpty)
-        #expect(!strawberrySnapshot.isEmpty)
-        #expect(classicSnapshot != strawberrySnapshot)
         #expect(MuesliTheme.cornerSmall == 12)
         #expect(MuesliTheme.cornerMedium == 17)
         #expect(MuesliTheme.cornerLarge == 22)

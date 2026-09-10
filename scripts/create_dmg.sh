@@ -4,12 +4,18 @@ set -euo pipefail
 # Creates a signed DMG from the installed app bundle with a custom Finder
 # window layout (dark background, icon positions, no toolbar/sidebar).
 # Usage: ./scripts/create_dmg.sh [app_path] [output_dir]
+# Set MUESLI_DMG_CONFIGURE_FINDER=0 to package without opening or scripting Finder.
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 APP_PATH="${1:-/Applications/Mimo.app}"
 OUTPUT_DIR="${2:-$ROOT/dist-release}"
-SIGN_IDENTITY="${MUESLI_SIGN_IDENTITY:-Developer ID Application: Pranav Hari Guruvayurappan (58W55QJ567)}"
+SIGN_IDENTITY="${MUESLI_SIGN_IDENTITY:-${MIMO_DEVELOPER_ID:-Developer ID Application: Edern Tan (5UK2557MH4)}}"
 BACKGROUND_DIR="$ROOT/scripts/assets"
+CONFIGURE_FINDER="${MUESLI_DMG_CONFIGURE_FINDER:-1}"
+case "$CONFIGURE_FINDER" in
+  0|1) ;;
+  *) echo "MUESLI_DMG_CONFIGURE_FINDER must be 0 or 1." >&2; exit 2 ;;
+esac
 
 if [[ ! -d "$APP_PATH" ]]; then
   echo "App not found: $APP_PATH" >&2
@@ -99,6 +105,7 @@ if [[ -z "$MOUNT_POINT" ]]; then
   exit 1
 fi
 
+if [[ "$CONFIGURE_FINDER" == 1 ]]; then
 echo "Configuring Finder window at: $MOUNT_POINT"
 # Wait briefly for Finder to register the mounted volume. If Finder is slow or
 # unavailable, the AppleScript block below fails non-fatally and the DMG remains usable.
@@ -146,6 +153,9 @@ APPLESCRIPT
 then
   echo "WARNING: Finder window configuration skipped (no GUI session or Automation permission)" >&2
   echo "  DMG will open with default Finder layout. Grant Terminal Automation access to enable." >&2
+fi
+else
+  echo "Packaging without Finder interaction; the DMG uses the default Finder layout."
 fi
 
 sync

@@ -144,45 +144,6 @@ struct DashboardRootView: View {
                 }
             }
         }
-        .alert(
-            appState.contributionMilestonePrompt?.title ?? "\(AppIdentity.displayName) milestone",
-            isPresented: Binding(
-                get: { appState.contributionMilestonePrompt != nil },
-                set: { if !$0 { controller.dismissContributionMilestonePrompt() } }
-            )
-        ) {
-            if appState.contributionMilestonePrompt?.showGitHubStar == true {
-                Button("Star on GitHub") {
-                    controller.openContributionMilestoneAction(.githubStar)
-                }
-            }
-            if appState.contributionMilestonePrompt?.showBuyMeCoffee == true {
-                Button("Buy Me a Coffee") {
-                    controller.openContributionMilestoneAction(.buyMeCoffee)
-                }
-            }
-            if appState.contributionMilestonePrompt?.showTweetAboutMuesli == true {
-                Button("Tweet about \(AppIdentity.displayName)") {
-                    controller.openContributionMilestoneAction(.tweetAboutMuesli)
-                }
-            }
-            if appState.contributionMilestonePrompt?.showPostOnLinkedIn == true {
-                Button("Post about \(AppIdentity.displayName) on LinkedIn") {
-                    controller.openContributionMilestoneAction(.postOnLinkedIn)
-                }
-            }
-            Button("Later", role: .cancel) {
-                controller.dismissContributionMilestonePrompt()
-            }
-        } message: {
-            Text(appState.contributionMilestonePrompt?.message ?? "")
-        }
-        .onAppear {
-            controller.recordContributionMilestonePromptSeen()
-        }
-        .onChange(of: appState.contributionMilestonePrompt?.id) { _, _ in
-            controller.recordContributionMilestonePromptSeen()
-        }
         .sheet(
             item: Binding<DiagnosticIncident?>(
                 get: { appState.pendingDiagnosticIncident },

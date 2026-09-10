@@ -60,6 +60,27 @@ Shipped builds compile the app via xcodebuild against `native/MuesliXcode/projec
 
 ## Parallel Dev Lanes
 
+### Maintainer's single-app workflow
+
+For this local workspace, the maintainer wants one final app for everyday use
+and ongoing testing: `/Applications/Mimo.app` (`com.muesli.app`, support directory
+`~/Library/Application Support/Mimo`). This preference supersedes choosing dev
+lanes below unless the user explicitly requests an isolated lane.
+
+Use `./scripts/install_local_app.sh --launch` to build a release-optimized Xcode
+app, verify its signature, App Intents, packaged CLI, and complete LocalVQE
+runtime before replacing the installed app. `--stage-only` builds and verifies
+without quitting or replacing it. Add `--remove-dev-lanes` to archive and remove
+installed MuesliDevA/B/C app bundles while retaining their data. Previous app
+bundles are archived under `~/Library/Application Support/Mimo Backups/Apps`.
+After reviewing a staged build, use `--install-staged /absolute/path/Mimo.app`
+to install that exact verified bundle without rebuilding it.
+The local installer preserves the installed update feed and Developer ID signing
+identity (or uses `MIMO_DEVELOPER_ID` when explicitly supplied). Before Developer
+ID is configured it uses local ad-hoc signing. It does not publish or notarize a
+distribution; use `scripts/build_mimo_dmg.sh` for that. Never reset app data or
+remove shared models as part of this replacement workflow.
+
 Use fixed lanes when testing multiple worktrees side by side:
 
 ```bash

@@ -19,7 +19,7 @@ struct LiveMeetingAssistantTests {
         #expect(!LiveMeetingWorkspacePolicy.opensLiveSummary(for: .completed))
     }
 
-    @Test("Live Meeting always uses ChatGPT subscription with GPT-5.4 Mini")
+    @Test("Live Meeting honors the selected ChatGPT model")
     func subscriptionModelPolicy() {
         var configured = AppConfig()
         configured.meetingSummaryBackend = MeetingSummaryBackendOption.ollama.backend
@@ -28,12 +28,16 @@ struct LiveMeetingAssistantTests {
         let live = MeetingSummaryClient.liveMeetingConfiguration(from: configured)
 
         #expect(live.meetingSummaryBackend == MeetingSummaryBackendOption.chatGPT.backend)
-        #expect(live.chatGPTModel == "gpt-5.4-mini")
+        #expect(live.chatGPTModel == "gpt-5.4")
         #expect(MeetingSummaryClient.liveMeetingBackend == "chatgpt")
-        #expect(MeetingSummaryClient.liveMeetingModel == "gpt-5.4-mini")
+        #expect(MeetingSummaryClient.liveMeetingModel == "auto")
+        configured.chatGPTModel = "gpt-5.4-mini"
+        #expect(MeetingSummaryClient.liveMeetingConfiguration(from: configured).chatGPTModel == "auto")
+        configured.chatGPTModel = "gpt-5.6-luna"
+        #expect(MeetingSummaryClient.liveMeetingConfiguration(from: configured).chatGPTModel == "gpt-5.6-luna")
     }
 
-    @Test("Live Meeting prefers configured local Parakeet or Apple Speech")
+    @Test("Live Meeting keeps the configured supported local transcriber")
     func localTranscriptionPolicy() {
         let available: [BackendOption] = [
             .whisperSmall,
@@ -52,13 +56,13 @@ struct LiveMeetingAssistantTests {
             BackendOption.resolvedLiveMeetingTranscriptionBackend(
                 configured: .whisperSmall,
                 availableOptions: available
-            ) == .parakeetUnified
+            ) == .whisperSmall
         )
         #expect(
             BackendOption.resolvedLiveMeetingTranscriptionBackend(
                 configured: .whisperSmall,
                 availableOptions: [.whisperSmall]
-            ) == nil
+            ) == .whisperSmall
         )
     }
 

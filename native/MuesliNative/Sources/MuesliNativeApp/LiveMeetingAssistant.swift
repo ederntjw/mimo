@@ -119,8 +119,8 @@ struct LiveMeetingAssistantSection: View {
                 )
                 serviceBadge(
                     appState.isChatGPTAuthenticated
-                        ? "ChatGPT · GPT-5.4 Mini"
-                        : "ChatGPT sign-in needed · GPT-5.4 Mini",
+                        ? "ChatGPT · \(SummaryModelPreset.chatGPTModelLabel(appState.config.chatGPTModel))"
+                        : "ChatGPT sign-in needed",
                     systemImage: "sparkles",
                     tint: MuesliTheme.accent
                 )

@@ -52,9 +52,9 @@ enum ModelsCategory: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .dictation: return "Dictation"
-        case .streaming: return "Live Meetings"
-        case .postProcessing: return "Cleanup"
+        case .dictation: return "Speech models"
+        case .streaming: return "Live captions"
+        case .postProcessing: return "Local AI"
         }
     }
 }
@@ -268,7 +268,6 @@ final class AppState {
     var isMimoAccountWorking: Bool = false
     var mimoAccountLastSyncSummary: String?
     var mimoAccountLastSyncedAt: Date?
-    var contributionMilestonePrompt: ContributionMilestonePrompt?
     var pendingDiagnosticIncident: DiagnosticIncident?
     var modelPreparationTitle: String?
     var modelPreparationDetail: String?

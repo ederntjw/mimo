@@ -19,6 +19,15 @@ struct MeetingChunkTimingTracker: Sendable {
     private var currentChunkStartSampleIndex: Int64?
     private var currentChunkSampleCount: Int64 = 0
 
+    func shouldRotate(maximumDuration: TimeInterval) -> Bool {
+        maximumDuration > 0 && canRotate(minimumDuration: maximumDuration)
+    }
+
+    func canRotate(minimumDuration: TimeInterval) -> Bool {
+        currentChunkStartSampleIndex != nil && currentChunkSampleCount > 0
+            && Double(currentChunkSampleCount) / Double(Self.sampleRate) >= minimumDuration
+    }
+
     mutating func start() {
         currentChunkStartSampleIndex = 0
         currentChunkSampleCount = 0

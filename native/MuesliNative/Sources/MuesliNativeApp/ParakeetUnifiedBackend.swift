@@ -10,6 +10,7 @@ actor ParakeetUnifiedTranscriber {
     private var asrManager: UnifiedAsrManager?
     private var loadedPlan: ManagedASRModelPlan?
     private var loadGeneration: UInt64 = 0
+    private var loadTask: Task<Void, Error>?
 
     enum TranscriberError: Error, LocalizedError {
         case notLoaded
@@ -27,7 +28,27 @@ actor ParakeetUnifiedTranscriber {
         progress: ((Double, String?) -> Void)? = nil,
         progressSnapshot: ModelDownloadProgressHandler? = nil
     ) async throws {
+        try Task.checkCancellation()
+        if let loadTask {
+            try await loadTask.value
+            try Task.checkCancellation()
+            return
+        }
         if asrManager != nil { return }
+        let generation = loadGeneration
+        let task = Task {
+            try await self.loadModelsOnce(progress: progress, progressSnapshot: progressSnapshot)
+        }
+        loadTask = task
+        defer { if loadGeneration == generation { loadTask = nil } }
+        try await task.value
+        try Task.checkCancellation()
+    }
+
+    private func loadModelsOnce(
+        progress: ((Double, String?) -> Void)?,
+        progressSnapshot: ModelDownloadProgressHandler?
+    ) async throws {
         let generation = loadGeneration
 
         fputs("[parakeet-unified] downloading/loading models...\n", stderr)
@@ -47,6 +68,7 @@ actor ParakeetUnifiedTranscriber {
             try await manager.loadModels(from: modelDirectory)
             return manager
         }
+        try Task.checkCancellation()
         // A shutdown() during the load must invalidate the result: discard the
         // freshly loaded manager instead of resurrecting a stale one.
         guard generation == loadGeneration else {
@@ -65,6 +87,8 @@ actor ParakeetUnifiedTranscriber {
 
     /// Transcribe a WAV file URL (16 kHz mono).
     func transcribe(wavURL: URL) async throws -> (text: String, processingTime: Double) {
+        try await loadModels()
+        try Task.checkCancellation()
         guard let asrManager else { throw TranscriberError.notLoaded }
         let converter = AudioConverter()
         let samples = try converter.resampleAudioFile(wavURL)
@@ -75,6 +99,8 @@ actor ParakeetUnifiedTranscriber {
     }
 
     func shutdown() {
+        loadTask?.cancel()
+        loadTask = nil
         asrManager = nil
         loadedPlan = nil
         loadGeneration &+= 1

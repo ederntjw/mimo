@@ -287,7 +287,7 @@ final class CoreAudioSystemRecorder: SystemAudioCapturing, SystemAudioDiagnostic
         // device-stream tap could be valid but zero-filled on some routes.
         let tapDesc = Self.makeGlobalTapDescription(
             excludingProcessID: Self.currentProcessAudioObjectID(),
-            name: "Muesli System Audio Tap"
+            name: "Mimo System Audio Tap"
         )
 
         // Register the tap with the audio system first — this triggers the
@@ -361,7 +361,7 @@ final class CoreAudioSystemRecorder: SystemAudioCapturing, SystemAudioDiagnostic
 
     static func makeAggregateDeviceDescription(tapUID: String, aggregateUID: String) -> NSDictionary {
         [
-            kAudioAggregateDeviceNameKey: "Muesli System Audio",
+            kAudioAggregateDeviceNameKey: "Mimo System Audio",
             kAudioAggregateDeviceUIDKey: aggregateUID,
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceTapListKey: [
@@ -674,7 +674,7 @@ final class CoreAudioSystemRecorder: SystemAudioCapturing, SystemAudioDiagnostic
         guard let selfObjectID = currentProcessAudioObjectID() else { return false }
         let tapDesc = makeGlobalTapDescription(
             excludingProcessID: selfObjectID,
-            name: "Muesli Permission Check"
+            name: "Mimo Permission Check"
         )
 
         var testTapID: AudioObjectID = kAudioObjectUnknown
@@ -814,7 +814,7 @@ final class CoreAudioSystemRecorder: SystemAudioCapturing, SystemAudioDiagnostic
                 deviceID, &nameAddr, 0, nil, &nameSize, &name
             ) == noErr, let name else { continue }
 
-            if (name.takeRetainedValue() as String) == "Muesli System Audio" {
+            if ["Mimo System Audio", "Muesli System Audio"].contains(name.takeRetainedValue() as String) {
                 fputs("[system-audio] cleaning up stale aggregate device \(deviceID)\n", stderr)
                 AudioHardwareDestroyAggregateDevice(deviceID)
             }

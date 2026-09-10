@@ -195,7 +195,7 @@ struct DictionaryView: View {
         let panel = NSSavePanel()
         panel.title = "Export \(AppIdentity.displayName) Dictionary"
         panel.prompt = "Export"
-        panel.nameFieldStringValue = "muesli-dictionary.json"
+        panel.nameFieldStringValue = "\(AppIdentity.brandName)-dictionary.json"
         panel.allowedContentTypes = [.json]
         panel.canCreateDirectories = true
 

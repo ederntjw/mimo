@@ -61,6 +61,8 @@ enum Qwen3AsrWarmupReadiness {
 @available(macOS 15, *)
 actor Qwen3AsrTranscriber {
     private var manager: MuesliQwen3AsrManager?
+    private var loadTask: Task<Void, Error>?
+    private var loadGeneration: UInt64 = 0
 
     enum TranscriberError: Error, LocalizedError {
         case notLoaded
@@ -78,7 +80,28 @@ actor Qwen3AsrTranscriber {
         progress: ((Double, String?) -> Void)? = nil,
         progressSnapshot: ModelDownloadProgressHandler? = nil
     ) async throws {
+        try Task.checkCancellation()
+        if let loadTask {
+            try await loadTask.value
+            try Task.checkCancellation()
+            return
+        }
         if manager != nil { return }
+        let generation = loadGeneration
+        let task = Task {
+            try await self.loadModelsOnce(progress: progress, progressSnapshot: progressSnapshot)
+        }
+        loadTask = task
+        defer { if loadGeneration == generation { loadTask = nil } }
+        try await task.value
+        try Task.checkCancellation()
+    }
+
+    private func loadModelsOnce(
+        progress: ((Double, String?) -> Void)?,
+        progressSnapshot: ModelDownloadProgressHandler?
+    ) async throws {
+        let generation = loadGeneration
 
         fputs("[qwen3-asr] downloading/loading models...\n", stderr)
         let plan = ManagedASRModelPlans.qwen3ASRInt8()
@@ -95,6 +118,8 @@ actor Qwen3AsrTranscriber {
             progressSnapshot?(preparing)
             let candidate = MuesliQwen3AsrManager()
             try await candidate.loadModels(from: modelDir)
+            try Task.checkCancellation()
+            guard generation == loadGeneration else { throw CancellationError() }
             self.manager = candidate
             fputs("[qwen3-asr] models loaded, running warmup inference...\n", stderr)
 
@@ -110,6 +135,8 @@ actor Qwen3AsrTranscriber {
                 throw error
             }
         }
+        try Task.checkCancellation()
+        guard generation == loadGeneration else { throw CancellationError() }
         self.manager = mgr
         let preparing = ModelDownloadProgress.preparing(
             modelID: plan.modelID,
@@ -124,6 +151,8 @@ actor Qwen3AsrTranscriber {
     /// Returns the transcribed text (no token-level timings available).
     /// `language` is an optional ISO code; nil keeps automatic language detection.
     func transcribe(wavURL: URL, language: String? = nil) async throws -> (text: String, processingTime: Double) {
+        try await loadModels()
+        try Task.checkCancellation()
         guard let manager else { throw TranscriberError.notLoaded }
         let start = CFAbsoluteTimeGetCurrent()
         let converter = AudioConverter()
@@ -134,6 +163,9 @@ actor Qwen3AsrTranscriber {
     }
 
     func shutdown() {
+        loadGeneration &+= 1
+        loadTask?.cancel()
+        loadTask = nil
         manager = nil
     }
 }

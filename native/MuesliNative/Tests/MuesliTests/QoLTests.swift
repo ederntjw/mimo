@@ -2,6 +2,8 @@ import AppKit
 import Testing
 import Foundation
 import MuesliCore
+import FluidAudio
+import os
 @testable import MuesliNativeApp
 
 @Suite("Dictation backend readiness")
@@ -35,21 +37,97 @@ struct DictationBackendReadinessTests {
 
 @Suite("ChatGPT Token Storage")
 struct ChatGPTTokenStorageTests {
-
-    @Test("isAuthenticated returns false when no token file exists")
-    @MainActor
-    func notAuthenticatedByDefault() {
-        // Shared singleton may have tokens from a prior test or real usage,
-        // so just verify the property is accessible and returns a Bool
-        let auth = ChatGPTAuthManager.shared
-        let _ = auth.isAuthenticated  // Should not crash
+    private func temporaryDirectory() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("muesli-chatgpt-storage-test-\(UUID().uuidString)", isDirectory: true)
     }
 
-    @Test("signOut does not crash even when not signed in")
+    private func writeFixture(to fileURL: URL, accessToken: String = "fixture-access-token") throws {
+        try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let tokens = [
+            "access_token": accessToken,
+            "account_id": "fixture-account",
+            "expires_at": String(Date().addingTimeInterval(3600).timeIntervalSince1970 * 1000),
+        ]
+        try JSONSerialization.data(withJSONObject: tokens).write(to: fileURL, options: .atomic)
+    }
+
+    @Test("a missing isolated token file is unauthenticated")
+    @MainActor
+    func notAuthenticatedByDefault() async {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let auth = ChatGPTAuthManager(
+            tokenFileURL: root.appendingPathComponent("chatgpt-auth.json"),
+            migrateLegacyKeychain: false
+        )
+        #expect(!auth.isAuthenticated)
+        await #expect(throws: ChatGPTAuthError.self) {
+            try await auth.validAccessToken()
+        }
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+    }
+
+    @Test("sign-out is idempotent for an isolated missing token file")
     @MainActor
     func signOutSafe() {
-        let auth = ChatGPTAuthManager.shared
-        auth.signOut()  // Should not crash
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tokenFileURL = root.appendingPathComponent("chatgpt-auth.json")
+        let auth = ChatGPTAuthManager(tokenFileURL: tokenFileURL, migrateLegacyKeychain: false)
+        auth.signOut()
+        auth.signOut()
+        #expect(!auth.isAuthenticated)
+        #expect(!FileManager.default.fileExists(atPath: tokenFileURL.path))
+    }
+
+    @Test("a valid isolated token file is read without contacting the account service")
+    @MainActor
+    func readsStoredToken() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tokenFileURL = root.appendingPathComponent("chatgpt-auth.json")
+        try writeFixture(to: tokenFileURL)
+        let auth = ChatGPTAuthManager(tokenFileURL: tokenFileURL, migrateLegacyKeychain: false)
+        #expect(auth.isAuthenticated)
+        let result = try await auth.validAccessToken()
+        #expect(result.token == "fixture-access-token")
+        #expect(result.accountId == "fixture-account")
+    }
+
+    @Test("sign-out removes only the instance's token file and preserves neighboring storage")
+    @MainActor
+    func signOutIsIsolated() async throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tokenFileURL = root.appendingPathComponent("first/chatgpt-auth.json")
+        let otherTokenFileURL = root.appendingPathComponent("second/chatgpt-auth.json")
+        let sentinel = root.appendingPathComponent("settings.json")
+        try writeFixture(to: tokenFileURL)
+        try writeFixture(to: otherTokenFileURL, accessToken: "other-fixture-token")
+        try Data("settings remain".utf8).write(to: sentinel)
+        let auth = ChatGPTAuthManager(tokenFileURL: tokenFileURL, migrateLegacyKeychain: false)
+        let otherAuth = ChatGPTAuthManager(tokenFileURL: otherTokenFileURL, migrateLegacyKeychain: false)
+        auth.signOut()
+        #expect(!auth.isAuthenticated)
+        #expect(!FileManager.default.fileExists(atPath: tokenFileURL.path))
+        #expect(otherAuth.isAuthenticated)
+        #expect(try await otherAuth.validAccessToken().token == "other-fixture-token")
+        #expect(try Data(contentsOf: sentinel) == Data("settings remain".utf8))
+    }
+
+    @Test("malformed isolated token storage is treated as signed out")
+    @MainActor
+    func malformedTokenFile() throws {
+        let root = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let tokenFileURL = root.appendingPathComponent("chatgpt-auth.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("not valid JSON".utf8).write(to: tokenFileURL)
+        let auth = ChatGPTAuthManager(tokenFileURL: tokenFileURL, migrateLegacyKeychain: false)
+        #expect(!auth.isAuthenticated)
+        auth.signOut()
+        #expect(!FileManager.default.fileExists(atPath: tokenFileURL.path))
     }
 }
 
@@ -623,6 +701,249 @@ struct FloatingIndicatorPointerInteractionTests {
     }
 
     @MainActor
+    @Test("expanded live transcript leaves the offset recording pill interactive")
+    func expandedMeetingPillHitTesting() throws {
+        let (indicator, store, directory) = makeMeetingIndicator()
+        defer {
+            indicator.close()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        indicator.setMeetingRecording(true, config: store.load())
+        indicator.setHovered(true)
+        let view = try #require(indicator.pointerInteractionViewForTesting)
+        let window = try #require(view.window)
+        #expect(view.frame.origin != .zero)
+
+        let decoration = NSTextField(labelWithString: "Recording")
+        decoration.frame = view.bounds
+        view.addSubview(decoration)
+        let point = NSPoint(x: view.frame.midX, y: view.frame.midY)
+        #expect(view.hitTest(point) === view)
+        #expect(view.hitTest(NSPoint(x: view.frame.minX - 1, y: point.y)) == nil)
+        #expect(view.acceptsFirstMouse(for: nil))
+        #expect(window.isMovable)
+        #expect(!window.isMovableByWindowBackground)
+    }
+
+    @MainActor
+    @Test("dragging an expanded meeting pill follows the pointer and saves its compact position")
+    func expandedMeetingDragPersistsWithoutRunningControls() throws {
+        let (indicator, store, directory) = makeMeetingIndicator()
+        defer {
+            indicator.close()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        var stopCount = 0
+        var pauseCount = 0
+        var discardCount = 0
+        var savedCenters: [CGPoint] = []
+        indicator.onStopMeeting = { stopCount += 1 }
+        indicator.onToggleMeetingPause = { pauseCount += 1 }
+        indicator.onDiscardMeeting = { discardCount += 1 }
+        // Use the same persistence contract as the app's onPositionSaved owner.
+        indicator.onPositionSaved = { center in
+            savedCenters.append(center)
+            var config = store.load()
+            config.indicatorAnchor = .custom
+            config.indicatorOrigin = CGPointCodable(x: center.x, y: center.y)
+            store.save(config)
+        }
+        indicator.setMeetingRecording(true, config: store.load())
+        indicator.setHovered(true)
+        let view = try #require(indicator.pointerInteractionViewForTesting)
+        let window = try #require(view.window)
+        let originalFrame = try #require(indicator.currentFrame)
+        let start = window.convertPoint(toScreen: view.convert(
+            NSPoint(x: 12, y: view.bounds.midY), to: nil
+        ))
+        let finish = NSPoint(x: start.x - 90, y: start.y + 55)
+
+        view.mouseDown(with: try pointerEvent(.leftMouseDown, screenPoint: start, window: window))
+        view.mouseDragged(with: try pointerEvent(.leftMouseDragged, screenPoint: finish, window: window))
+        view.mouseUp(with: try pointerEvent(.leftMouseUp, screenPoint: finish, window: window))
+
+        let movedFrame = try #require(indicator.currentFrame)
+        let expectedCenter = CGPoint(x: originalFrame.midX - 90, y: originalFrame.midY + 55)
+        #expect(movedFrame.origin == originalFrame.offsetBy(dx: -90, dy: 55).origin)
+        #expect(movedFrame.size == originalFrame.size)
+        #expect(window.frame == movedFrame)
+        #expect(savedCenters == [expectedCenter])
+        #expect(stopCount == 0)
+        #expect(pauseCount == 0)
+        #expect(discardCount == 0)
+
+        indicator.setMeetingRecordingPaused(true, config: store.load())
+        #expect(indicator.currentFrame?.midX == expectedCenter.x)
+        #expect(indicator.currentFrame?.midY == expectedCenter.y)
+        indicator.close()
+        let reopened = FloatingIndicatorController(configStore: store)
+        defer { reopened.close() }
+        reopened.setMeetingRecording(true, config: store.load())
+        #expect(reopened.currentFrame?.midX == expectedCenter.x)
+        #expect(reopened.currentFrame?.midY == expectedCenter.y)
+    }
+
+    @MainActor
+    @Test("small pointer movements still activate pause and stop instead of saving a drag")
+    func meetingControlClicksSurviveDragRouting() throws {
+        let (indicator, store, directory) = makeMeetingIndicator()
+        defer {
+            indicator.close()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        var pauses = 0
+        var stops = 0
+        var savedPositions = 0
+        indicator.onToggleMeetingPause = { pauses += 1 }
+        indicator.onStopMeeting = { stops += 1 }
+        indicator.onPositionSaved = { _ in savedPositions += 1 }
+        indicator.setMeetingRecording(true, config: store.load())
+        let view = try #require(indicator.pointerInteractionViewForTesting)
+        let window = try #require(view.window)
+        for x in [CGFloat(12), CGFloat(50)] {
+            let start = window.convertPoint(toScreen: view.convert(NSPoint(x: x, y: view.bounds.midY), to: nil))
+            let finish = NSPoint(x: start.x + 1, y: start.y + 1)
+            view.mouseDown(with: try pointerEvent(.leftMouseDown, screenPoint: start, window: window))
+            view.mouseDragged(with: try pointerEvent(.leftMouseDragged, screenPoint: finish, window: window))
+            view.mouseUp(with: try pointerEvent(.leftMouseUp, screenPoint: finish, window: window))
+        }
+        #expect(pauses == 1)
+        #expect(stops == 1)
+        #expect(savedPositions == 0)
+    }
+
+    @MainActor
+    @Test("meeting processing stays at the dragged recording anchor and remains draggable")
+    func meetingProcessingRetainsPosition() throws {
+        let (indicator, store, directory) = makeMeetingIndicator()
+        defer {
+            indicator.close()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        var savedCenters: [CGPoint] = []
+        indicator.onPositionSaved = { center in
+            savedCenters.append(center)
+            var config = store.load()
+            config.indicatorAnchor = .custom
+            config.indicatorOrigin = CGPointCodable(x: center.x, y: center.y)
+            store.save(config)
+        }
+        indicator.setMeetingRecording(true, config: store.load())
+        try drag(indicator, by: CGPoint(x: -110, y: 60))
+        let recordingAnchor = try #require(savedCenters.last)
+        indicator.setMeetingRecording(false, config: store.load())
+
+        for status in ["Transcribing", "Cleaning", "Titling", "Summarizing"] {
+            indicator.showMeetingProcessingStatus(status, config: store.load())
+            let frame = try #require(indicator.currentFrame)
+            #expect(indicator.pointerInteractionViewForTesting?.window?.frame == frame)
+            #expect(frame.midX == recordingAnchor.x)
+            #expect(frame.midY == recordingAnchor.y)
+        }
+
+        try drag(indicator, by: CGPoint(x: 75, y: -45))
+        let processingAnchor = try #require(savedCenters.last)
+        #expect(processingAnchor == CGPoint(x: recordingAnchor.x + 75, y: recordingAnchor.y - 45))
+        #expect(savedCenters.count == 2)
+        indicator.showMeetingProcessingStatus("Transcribing", config: store.load())
+        #expect(indicator.currentFrame?.midX == processingAnchor.x)
+        #expect(indicator.currentFrame?.midY == processingAnchor.y)
+        indicator.setState(.idle, config: store.load())
+        indicator.setMeetingRecording(true, config: store.load())
+        #expect(indicator.currentFrame?.midX == processingAnchor.x)
+        #expect(indicator.currentFrame?.midY == processingAnchor.y)
+    }
+
+    @MainActor
+    @Test("dictation above a focused input never replaces the meeting's saved anchor")
+    func dictationPlacementDoesNotMoveMeeting() throws {
+        let (unusedIndicator, store, directory) = makeMeetingIndicator()
+        unusedIndicator.close()
+        let visible = try #require(NSScreen.main?.visibleFrame)
+        let field = CGRect(x: visible.minX + 100, y: visible.minY + 100, width: 260, height: 70)
+        var inputQueries = 0
+        let indicator = FloatingIndicatorController(configStore: store, textInputFrameProvider: {
+            inputQueries += 1
+            return field
+        })
+        defer {
+            indicator.close()
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let originalConfig = store.load()
+        let savedAnchor = try #require(originalConfig.indicatorOrigin)
+        var savedPositions = 0
+        indicator.onPositionSaved = { _ in savedPositions += 1 }
+        indicator.showMeetingProcessingStatus("Summarizing", config: originalConfig)
+        #expect(inputQueries == 0)
+
+        for state in [DictationState.preparing, .recording, .transcribing] {
+            indicator.setState(state, config: originalConfig)
+            let frame = try #require(indicator.currentFrame)
+            #expect(frame.midX == field.midX)
+            #expect(frame.minY == field.maxY + 8)
+            try drag(indicator, by: CGPoint(x: 60, y: 40))
+            #expect(indicator.currentFrame == frame)
+        }
+        #expect(inputQueries > 0)
+        #expect(savedPositions == 0)
+        #expect(store.load().indicatorOrigin?.x == savedAnchor.x)
+        #expect(store.load().indicatorOrigin?.y == savedAnchor.y)
+
+        indicator.showMeetingProcessingStatus("Summarizing", config: store.load())
+        let processingFrame = try #require(indicator.currentFrame)
+        #expect(abs(processingFrame.midX - CGFloat(savedAnchor.x)) <= 0.5)
+        #expect(abs(processingFrame.midY - CGFloat(savedAnchor.y)) <= 0.5)
+        indicator.setMeetingRecording(true, config: store.load())
+        let recordingFrame = try #require(indicator.currentFrame)
+        #expect(abs(recordingFrame.midX - CGFloat(savedAnchor.x)) <= 0.5)
+        #expect(abs(recordingFrame.midY - CGFloat(savedAnchor.y)) <= 0.5)
+    }
+
+    @MainActor
+    private func drag(_ indicator: FloatingIndicatorController, by offset: CGPoint) throws {
+        let view = try #require(indicator.pointerInteractionViewForTesting)
+        let window = try #require(view.window)
+        let start = window.convertPoint(toScreen: view.convert(
+            NSPoint(x: view.bounds.midX, y: view.bounds.midY), to: nil
+        ))
+        let finish = CGPoint(x: start.x + offset.x, y: start.y + offset.y)
+        view.mouseDown(with: try pointerEvent(.leftMouseDown, screenPoint: start, window: window))
+        view.mouseDragged(with: try pointerEvent(.leftMouseDragged, screenPoint: finish, window: window))
+        view.mouseUp(with: try pointerEvent(.leftMouseUp, screenPoint: finish, window: window))
+    }
+
+    @MainActor
+    private func pointerEvent(_ type: NSEvent.EventType, screenPoint: NSPoint, window: NSWindow) throws -> NSEvent {
+        try #require(NSEvent.mouseEvent(
+            with: type,
+            location: window.convertPoint(fromScreen: screenPoint),
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        ))
+    }
+
+    @MainActor
+    private func makeMeetingIndicator() -> (FloatingIndicatorController, ConfigStore, URL) {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("floating-meeting-drag-\(UUID().uuidString)", isDirectory: true)
+        let store = ConfigStore(supportDirectory: directory)
+        var config = AppConfig()
+        let screen = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1024, height: 768)
+        config.indicatorAnchor = .custom
+        config.indicatorOrigin = CGPointCodable(x: screen.midX, y: screen.midY)
+        config.indicatorHoverStyle = .classic
+        config.showMeetingTranscriptOnIndicatorHover = true
+        store.save(config)
+        return (FloatingIndicatorController(configStore: store), store, directory)
+    }
+
+    @MainActor
     private func makeIndicator() -> FloatingIndicatorController {
         let supportDirectory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -773,6 +1094,105 @@ struct MeetingChunkCollectorTests {
 
 @Suite("Meeting chunk timing")
 struct MeetingChunkTimingTrackerTests {
+    @Test("fast bilingual sample caps follow the selected backend with or without VAD")
+    func bilingualSampleCapsFollowBackend() {
+        let timing = StreamingVadController.ChunkTiming.self
+        #expect(timing.fastBilingual.minimum == 1.5)
+        #expect(timing.fastBilingual.maximum == 5)
+        #expect(timing.sampleCap(bilingual: true, backend: "sensevoice", hasVAD: true) == 3)
+        #expect(timing.sampleCap(bilingual: true, backend: "sensevoice", hasVAD: false) == 3)
+        #expect(timing.sampleCap(bilingual: true, backend: "whisper", hasVAD: true) == nil)
+        #expect(timing.sampleCap(bilingual: true, backend: "whisper", hasVAD: false) == 5)
+        #expect(timing.sampleCap(bilingual: false, backend: "sensevoice", hasVAD: true) == nil)
+        #expect(timing.sampleCap(bilingual: false, backend: "fluidaudio", hasVAD: false) == 5)
+    }
+
+    @Test("changing a live backend applies its cap to the already recorded samples")
+    func backendChangeUpdatesSampleCap() throws {
+        var tracker = MeetingChunkTimingTracker()
+        tracker.start()
+        tracker.append(sampleCount: 4 * 16_000)
+        let senseVoiceCap = try #require(StreamingVadController.ChunkTiming.sampleCap(
+            bilingual: true, backend: "sensevoice", hasVAD: true
+        ))
+        #expect(tracker.shouldRotate(maximumDuration: senseVoiceCap))
+        #expect(tracker.rotate()?.durationSeconds == 4)
+
+        let whisperFallbackCap = try #require(StreamingVadController.ChunkTiming.sampleCap(
+            bilingual: true, backend: "whisper", hasVAD: false
+        ))
+        tracker.append(sampleCount: 4 * 16_000)
+        #expect(!tracker.shouldRotate(maximumDuration: whisperFallbackCap))
+        tracker.append(sampleCount: 16_000)
+        #expect(tracker.shouldRotate(maximumDuration: whisperFallbackCap))
+        #expect(tracker.rotate()?.startTimeSeconds == 4)
+    }
+
+    @Test("a queued VAD callback cannot rotate an empty or short chunk after a sample-cap rotation")
+    func duplicateBoundaryDoesNotCreateShortChunk() {
+        var tracker = MeetingChunkTimingTracker()
+        tracker.start()
+        #expect(!tracker.canRotate(minimumDuration: 0))
+        tracker.append(sampleCount: 48_000)
+        // AEC flush appends through the same funnel before one outer rotation.
+        tracker.append(sampleCount: 320)
+        #expect(tracker.rotate()?.sampleCount == 48_320)
+        #expect(!tracker.canRotate(minimumDuration: 1.5))
+        tracker.append(sampleCount: 320)
+        #expect(!tracker.canRotate(minimumDuration: 1.5))
+        // Pause/finalization may still preserve a deliberately short tail.
+        #expect(tracker.canRotate(minimumDuration: 0))
+        tracker.append(sampleCount: 23_680)
+        #expect(tracker.canRotate(minimumDuration: 1.5))
+    }
+
+    @Test("real chunk rotation invalidates an already delivered VAD boundary request")
+    func externalRotationInvalidatesQueuedVADBoundary() async throws {
+        let requests = OSAllocatedUnfairLock(initialState: [StreamingVadController.BoundaryRequest]())
+        let controller = StreamingVadController(
+            minChunkDuration: 0,
+            maxChunkDuration: 3600,
+            makeInitialState: { VadStreamState.initial() },
+            processStreamChunk: { _, state in
+                VadStreamResult(
+                    state: state,
+                    event: VadStreamEvent(kind: .speechEnd, sampleIndex: VadManager.chunkSize),
+                    probability: 0.05
+                )
+            }
+        )
+        controller.onChunkBoundary = { request in requests.withLock { $0.append(request) } }
+        controller.start()
+        defer { controller.stop() }
+        controller.processAudio([Float](repeating: 0, count: VadManager.chunkSize))
+        let deadline = ContinuousClock.now + .seconds(2)
+        while requests.withLock({ $0.isEmpty }), ContinuousClock.now < deadline {
+            await MainActor.run {}
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        let request = try #require(requests.withLock { $0.first })
+        #expect(controller.isCurrentBoundary(request))
+        controller.notifyRotation()
+        #expect(!controller.isCurrentBoundary(request))
+        controller.stop()
+        #expect(!controller.isCurrentBoundary(request))
+    }
+
+    @Test("sample-based fallback rotates live chunks when VAD is unavailable")
+    func fallbackRotationTracksRecordedSamples() {
+        var tracker = MeetingChunkTimingTracker()
+        #expect(!tracker.shouldRotate(maximumDuration: 3))
+        tracker.start()
+        tracker.append(sampleCount: 47_999)
+        #expect(!tracker.shouldRotate(maximumDuration: 3))
+        tracker.append(sampleCount: 1)
+        #expect(tracker.shouldRotate(maximumDuration: 3))
+        #expect(tracker.rotate()?.durationSeconds == 3)
+        #expect(!tracker.shouldRotate(maximumDuration: 3))
+        tracker.discard()
+        tracker.append(sampleCount: 48_000)
+        #expect(!tracker.shouldRotate(maximumDuration: 3))
+    }
 
     @Test("tracks chunk offsets from processed sample counts")
     func tracksChunkOffsets() {

@@ -1,6 +1,8 @@
 import Testing
 import Foundation
 import MuesliCore
+import FluidAudio
+import WhisperKit
 @testable import MuesliNativeApp
 
 @Suite("SpeechSegment")
@@ -94,6 +96,191 @@ struct TranscriptionCoordinatorTests {
         var backends = Set(BackendOption.all.map(\.backend))
         backends.insert(BackendOption.appleSpeechAnalyzer.backend)
         #expect(backends == TranscriptionCoordinator.explicitlyRoutedBackendIdentifiers.union(["fluidaudio"]))
+    }
+
+    @Test("Whisper meeting and dictation requests use their chosen model after another model was preloaded")
+    func whisperRequestsKeepSelectedModel() async throws {
+        let recorder = ModelSelectionRecorder()
+        let transcriber = WhisperKitTranscriber(modelLoader: { model, _, _ in
+            await recorder.append("load:\(model)")
+            return ModelSelectionWhisperRuntime(model: model, recorder: recorder)
+        })
+        let coordinator = TranscriptionCoordinator(whisperTranscriber: transcriber)
+        let url = URL(fileURLWithPath: "/unused/model-selection.wav")
+
+        try await transcriber.loadModel(modelName: BackendOption.whisperTinyEnglish.model)
+        let meeting = try await coordinator.transcribeMeetingChunk(
+            at: url, backend: .whisperLargeTurbo, whisperLanguage: .auto
+        )
+        #expect(meeting.text == "Transcript from \(BackendOption.whisperLargeTurbo.model)")
+        let dictation = try await coordinator.transcribeDictation(
+            at: url, backend: .whisperTinyEnglish, whisperLanguage: .auto
+        )
+        #expect(dictation.text == "Transcript from \(BackendOption.whisperTinyEnglish.model)")
+        #expect(await recorder.events == [
+            "load:tiny.en", "load:\(BackendOption.whisperLargeTurbo.model)",
+            "decode:\(BackendOption.whisperLargeTurbo.model):detect=true:fast=true",
+            "load:tiny.en", "decode:tiny.en:detect=false:fast=false",
+        ])
+    }
+
+    @Test("timestamped Whisper text removes decoder markers without altering spoken numbers")
+    func whisperSegmentTextRemovesDecoderMarkers() {
+        #expect(WhisperKitTranscriber.visibleSegmentText("<|zh|><|transcribe|><|0.00|>预算是5000美元。<|2.14|>") == "预算是5000美元。")
+        #expect(WhisperKitTranscriber.visibleSegmentText("<|8.38|>We need feedback before Thursday at 12:30.<|11.24|>") == "We need feedback before Thursday at 12:30.")
+    }
+
+    @Test("full Whisper preserves distant speech timestamps through meeting routing")
+    func fullWhisperPreservesSegmentTiming() async throws {
+        let expected = [
+            SpeechSegment(start: 0.5, end: 8, text: "The launch is Friday."),
+            SpeechSegment(start: 120, end: 128, text: "预算是五千美元。"),
+        ]
+        let recorder = ModelSelectionRecorder()
+        let transcriber = WhisperKitTranscriber(modelLoader: { model, _, _ in
+            await recorder.append(model)
+            return TimestampedWhisperRuntime(segments: expected)
+        })
+        let coordinator = TranscriptionCoordinator(whisperTranscriber: transcriber)
+        let result = try await coordinator.transcribeMeeting(
+            at: URL(fileURLWithPath: "/unused/full-meeting.wav"),
+            backend: .whisperLargeV3, whisperLanguage: .auto
+        )
+        #expect(await recorder.events == ["large-v3"])
+        #expect(result.segments.count == 2)
+        #expect(result.segments.map(\.start) == [0.5, 120])
+        #expect(result.segments.map(\.end) == [8, 128])
+        #expect(result.segments.map(\.text) == expected.map(\.text))
+    }
+
+    @Test("Whisper preload waits until an active request has finished decoding its selected model")
+    func whisperPreloadCannotReplaceActiveRequest() async throws {
+        let recorder = ModelSelectionRecorder()
+        let inferenceStarted = TranscriptionLifecycleTestLatch()
+        let allowInference = TranscriptionLifecycleTestLatch()
+        let gate = InferenceGate()
+        let transcriber = WhisperKitTranscriber(modelLoader: { model, _, _ in
+            await recorder.append("load:\(model)")
+            return ModelSelectionWhisperRuntime(
+                model: model, recorder: recorder,
+                inferenceStarted: inferenceStarted, allowInference: allowInference
+            )
+        }, operationGate: gate)
+        let request = Task {
+            try await transcriber.transcribe(
+                wavURL: URL(fileURLWithPath: "/unused/model-selection.wav"), modelName: "small"
+            )
+        }
+        await inferenceStarted.wait()
+        let preload = Task { try await transcriber.loadModel(modelName: "tiny.en") }
+        let queued = await modelOperationIsQueued(gate)
+        #expect(queued)
+        #expect(await recorder.events == ["load:small", "decode:small:detect=true:fast=false"])
+        await allowInference.signal()
+        #expect(try await request.value.text == "Transcript from small")
+        try await preload.value
+        #expect((await recorder.events).last == "load:tiny.en")
+    }
+
+    @Test("A Whisper request switches to its model after an older preload finishes")
+    func whisperRequestAfterInflightPreload() async throws {
+        let recorder = ModelSelectionRecorder()
+        let preloadStarted = TranscriptionLifecycleTestLatch()
+        let allowPreload = TranscriptionLifecycleTestLatch()
+        let gate = InferenceGate()
+        let transcriber = WhisperKitTranscriber(modelLoader: { model, _, _ in
+            await recorder.append("load:\(model)")
+            if model == "tiny.en" {
+                await preloadStarted.signal()
+                await allowPreload.wait()
+            }
+            return ModelSelectionWhisperRuntime(model: model, recorder: recorder)
+        }, operationGate: gate)
+        let preload = Task { try await transcriber.loadModel(modelName: "tiny.en") }
+        await preloadStarted.wait()
+        let request = Task {
+            try await transcriber.transcribe(
+                wavURL: URL(fileURLWithPath: "/unused/model-selection.wav"), modelName: "small"
+            )
+        }
+        #expect(await modelOperationIsQueued(gate))
+        await allowPreload.signal()
+        try await preload.value
+        #expect(try await request.value.text == "Transcript from small")
+        #expect(await recorder.events == ["load:tiny.en", "load:small", "decode:small:detect=true:fast=false"])
+    }
+
+    @Test("Whisper warmup names its model and a failed switch does not fall back to the previous model")
+    func whisperWarmupAndFailedSwitch() async throws {
+        let recorder = ModelSelectionRecorder()
+        let transcriber = WhisperKitTranscriber(modelLoader: { model, _, _ in
+            await recorder.append("load:\(model)")
+            if model == "unavailable" { throw ModelSelectionTestError.unavailable }
+            return ModelSelectionWhisperRuntime(model: model, recorder: recorder)
+        })
+        try await transcriber.loadModel(modelName: "tiny.en")
+        try await transcriber.warmup(modelName: "small")
+        do {
+            _ = try await transcriber.transcribe(
+                wavURL: URL(fileURLWithPath: "/unused/model-selection.wav"), modelName: "unavailable"
+            )
+            Issue.record("Unavailable selected model must fail instead of decoding with the prior model")
+        } catch ModelSelectionTestError.unavailable {}
+        let recovered = try await transcriber.transcribe(
+            wavURL: URL(fileURLWithPath: "/unused/model-selection.wav"), modelName: "tiny.en"
+        )
+        #expect(recovered.text == "Transcript from tiny.en")
+        #expect(await recorder.events == [
+            "load:tiny.en", "load:small", "warmup:small", "load:unavailable",
+            "load:tiny.en", "decode:tiny.en:detect=false:fast=false",
+        ])
+    }
+
+    @Test("Parakeet routing follows v2 and v3 selections even after another version was preloaded")
+    func parakeetRequestsKeepSelectedVersion() async throws {
+        let recorder = ModelSelectionRecorder()
+        let transcriber = FluidAudioTranscriber(modelLoader: { version, _, _ in
+            let model = version == .v2 ? "v2" : "v3"
+            await recorder.append("load:\(model)")
+            return ModelSelectionFluidRuntime(model: model, recorder: recorder)
+        })
+        let coordinator = TranscriptionCoordinator(fluidTranscriber: transcriber)
+        let url = URL(fileURLWithPath: "/unused/model-selection.wav")
+        try await transcriber.loadModels(version: .v2)
+        let meeting = try await coordinator.transcribeMeeting(at: url, backend: .parakeetMultilingual)
+        #expect(meeting.text == "Transcript from v3")
+        let dictation = try await coordinator.transcribeDictation(at: url, backend: .parakeetEnglish)
+        #expect(dictation.text == "Transcript from v2")
+        #expect(await recorder.events == ["load:v2", "load:v3", "decode:v3", "load:v2", "decode:v2"])
+    }
+
+    @Test("A Parakeet preload cannot replace a model while its request is running")
+    func parakeetPreloadCannotReplaceActiveRequest() async throws {
+        let recorder = ModelSelectionRecorder()
+        let inferenceStarted = TranscriptionLifecycleTestLatch()
+        let allowInference = TranscriptionLifecycleTestLatch()
+        let gate = InferenceGate()
+        let transcriber = FluidAudioTranscriber(modelLoader: { version, _, _ in
+            let model = version == .v2 ? "v2" : "v3"
+            await recorder.append("load:\(model)")
+            return ModelSelectionFluidRuntime(
+                model: model, recorder: recorder,
+                inferenceStarted: inferenceStarted, allowInference: allowInference
+            )
+        }, operationGate: gate)
+        let request = Task {
+            try await transcriber.transcribe(
+                wavURL: URL(fileURLWithPath: "/unused/model-selection.wav"), version: .v3
+            )
+        }
+        await inferenceStarted.wait()
+        let preload = Task { try await transcriber.loadModels(version: .v2) }
+        #expect(await modelOperationIsQueued(gate))
+        #expect(await recorder.events == ["load:v3", "decode:v3"])
+        await allowInference.signal()
+        #expect(try await request.value.text == "Transcript from v3")
+        try await preload.value
+        #expect((await recorder.events).last == "load:v2")
     }
 
     @Test("Apple Speech cleanup waits for an active use")
@@ -238,6 +425,58 @@ struct TranscriptionCoordinatorTests {
         await lifecycle.endUse()
         #expect(await secondCleanupCount.value == 1)
     }
+}
+
+private enum ModelSelectionTestError: Error {
+    case unavailable
+}
+
+private actor ModelSelectionRecorder {
+    private(set) var events: [String] = []
+
+    func append(_ event: String) {
+        events.append(event)
+    }
+}
+
+private struct ModelSelectionWhisperRuntime: WhisperKitModelRuntime {
+    let model: String
+    let recorder: ModelSelectionRecorder
+    var inferenceStarted: TranscriptionLifecycleTestLatch?
+    var allowInference: TranscriptionLifecycleTestLatch?
+
+    func transcribe(wavURL: URL, decodeOptions: DecodingOptions) async throws -> String {
+        await recorder.append("decode:\(model):detect=\(decodeOptions.detectLanguage):fast=\(decodeOptions.withoutTimestamps)")
+        await inferenceStarted?.signal()
+        await allowInference?.wait()
+        return "Transcript from \(model)"
+    }
+
+    func warmup() async throws {
+        await recorder.append("warmup:\(model)")
+    }
+}
+
+private struct ModelSelectionFluidRuntime: FluidAudioModelRuntime {
+    let model: String
+    let recorder: ModelSelectionRecorder
+    var inferenceStarted: TranscriptionLifecycleTestLatch?
+    var allowInference: TranscriptionLifecycleTestLatch?
+
+    func transcribe(wavURL: URL, language: String?) async throws -> ASRResult {
+        await recorder.append("decode:\(model)")
+        await inferenceStarted?.signal()
+        await allowInference?.wait()
+        return ASRResult(text: "Transcript from \(model)", confidence: 1, duration: 1, processingTime: 0.01)
+    }
+}
+
+private func modelOperationIsQueued(_ gate: InferenceGate) async -> Bool {
+    for _ in 0..<1_000 {
+        if await gate.queuedWaiterCount() > 0 { return true }
+        await Task.yield()
+    }
+    return false
 }
 
 private actor TranscriptionLifecycleTestCounter {
@@ -662,4 +901,16 @@ struct Qwen3PostProcessingOutputCleanerTests {
             input: #"Subject quote Muesli launch notes body ask Priyanka to review the quote AI Models quote settings copy"#
         ))
     }
+}
+
+private struct TimestampedWhisperRuntime: WhisperKitModelRuntime {
+    let segments: [SpeechSegment]
+    func transcribe(wavURL: URL, decodeOptions: DecodingOptions) async throws -> String {
+        segments.map(\.text).joined(separator: " ")
+    }
+    func transcribeResult(wavURL: URL, decodeOptions: DecodingOptions) async throws -> SpeechTranscriptionResult {
+        #expect(!decodeOptions.withoutTimestamps)
+        return SpeechTranscriptionResult(text: segments.map(\.text).joined(separator: " "), segments: segments)
+    }
+    func warmup() async throws {}
 }

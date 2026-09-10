@@ -189,9 +189,10 @@ enum AudioFileImportController {
             backend: backend,
             cohereLanguage: config.resolvedCohereLanguage,
             indicASRLanguage: config.resolvedIndicASRLanguage,
-            whisperLanguage: config.resolvedWhisperLanguage,
+            whisperLanguage: config.resolvedMeetingWhisperLanguage,
             parakeetLanguage: config.resolvedParakeetLanguage,
-            appleSpeechLanguage: config.resolvedAppleSpeechLanguage
+            appleSpeechLanguage: config.resolvedAppleSpeechLanguage,
+            nemotron35Language: config.resolvedMeetingNemotron35Language
         )
         let rawTranscript = transcription.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !rawTranscript.isEmpty else {

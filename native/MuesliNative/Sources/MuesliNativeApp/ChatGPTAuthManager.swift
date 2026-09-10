@@ -28,7 +28,10 @@ enum ChatGPTAuthError: Error, LocalizedError {
 
 @MainActor
 final class ChatGPTAuthManager {
-    static let shared = ChatGPTAuthManager()
+    static let shared = ChatGPTAuthManager(
+        tokenFileURL: AppIdentity.supportDirectoryURL.appendingPathComponent("chatgpt-auth.json"),
+        migrateLegacyKeychain: true
+    )
 
     private static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
     private static let authURL = "https://auth.openai.com/oauth/authorize"
@@ -37,13 +40,17 @@ final class ChatGPTAuthManager {
     private static let scopes = "openid profile email offline_access"
     private static let callbackTimeoutSeconds: TimeInterval = 300 // 5 minutes
 
-    private var tokenFileURL: URL {
-        AppIdentity.supportDirectoryURL.appendingPathComponent("chatgpt-auth.json")
-    }
+    private let tokenFileURL: URL
+    private let managesLegacyKeychain: Bool
 
-    private init() {
-        // Migrate from legacy keychain storage to file
-        migrateFromKeychain()
+    /// Explicit storage keeps tests and other isolated instances away from the
+    /// user's login. Only the production singleton opts into legacy keychain use.
+    init(tokenFileURL: URL, migrateLegacyKeychain: Bool = false) {
+        self.tokenFileURL = tokenFileURL
+        self.managesLegacyKeychain = migrateLegacyKeychain
+        if migrateLegacyKeychain {
+            migrateFromKeychain()
+        }
     }
 
     // MARK: - Public API
@@ -62,9 +69,11 @@ final class ChatGPTAuthManager {
 
     func signOut() {
         deleteTokens()
-        // Also clean up legacy keychain entries
-        for account in ["access_token", "refresh_token", "expires_at", "account_id"] {
-            keychainDeleteLegacy(account: account)
+        // An isolated token file must never delete the user's legacy login.
+        if managesLegacyKeychain {
+            for account in ["access_token", "refresh_token", "expires_at", "account_id"] {
+                keychainDeleteLegacy(account: account)
+            }
         }
         fputs("[chatgpt-auth] signed out\n", stderr)
     }
@@ -127,7 +136,7 @@ final class ChatGPTAuthManager {
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "id_token_add_organizations", value: "true"),
             URLQueryItem(name: "codex_cli_simplified_flow", value: "true"),
-            URLQueryItem(name: "originator", value: "muesli"),
+            URLQueryItem(name: "originator", value: ChatGPTResponsesTransport.originator),
         ]
         return components.url
     }
@@ -210,7 +219,7 @@ final class ChatGPTAuthManager {
                     Content-Type: text/html\r
                     Connection: close\r
                     \r
-                    <!DOCTYPE html><html><body style="font-family:-apple-system,system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a1a;color:#fff"><div style="text-align:center"><h2>Signed in to Muesli</h2><p>You can close this window.</p></div></body></html>
+                    <!DOCTYPE html><html><body style="font-family:-apple-system,system-ui;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a1a;color:#fff"><div style="text-align:center"><h2>Signed in to Mimo</h2><p>You can close this window.</p></div></body></html>
                     """
                     connection.send(
                         content: html.data(using: .utf8),

@@ -8,9 +8,26 @@ import MuesliCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var controller: MuesliController?
-    private var terminationTask: Task<Void, Never>?
+    private let terminationCoordinator = ApplicationTerminationCoordinator()
     private(set) var updaterController: SPUStandardUpdaterController?
     private let sparkleUpdateDelegate = SparkleUpdateDelegate()
+    private let reopenHandler: (@MainActor () -> Void)?
+
+    init(reopenHandler: (@MainActor () -> Void)? = nil) {
+        self.reopenHandler = reopenHandler
+        super.init()
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // A menu-bar app can remain running after its last window closes. Finder
+        // and Dock launches must reveal its main UI even if an overlay is visible.
+        if let reopenHandler {
+            reopenHandler()
+        } else {
+            controller?.reopenMainWindow()
+        }
+        return false
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installStandardEditMenu()
@@ -73,7 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if terminationTask != nil {
+        if terminationCoordinator.hasStarted {
             return .terminateLater
         }
         if controller?.shouldTerminateApplication() == false {
@@ -81,11 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         guard let controller else { return .terminateNow }
 
-        terminationTask = Task { @MainActor [weak self] in
-            await controller.shutdown()
-            self?.terminationTask = nil
-            sender.reply(toApplicationShouldTerminate: true)
-        }
+        terminationCoordinator.beginShutdown(
+            cleanup: { await controller.shutdown() },
+            completion: { sender.reply(toApplicationShouldTerminate: true) }
+        )
         return .terminateLater
     }
 
@@ -410,12 +426,12 @@ final class SparkleUpdateDelegate: NSObject, SPUUpdaterDelegate, SPUStandardUser
 enum UpdateFailureGuidance {
     private static let noUpdateErrorCode = 1001
 
-    static let downloadPageURLString = "https://muesli-hq.github.io/muesli/"
+    static let downloadPageURLString = AppIdentity.sourceRepositoryURL.appending(path: "releases/latest").absoluteString
 
     static let message = """
-    Please quit Muesli, reopen it from Applications, and try the update once more.
+    Please quit Mimo, reopen it from Applications, and try the update once more.
 
-    If this keeps happening, download the latest DMG and replace Muesli manually. This can happen when the local updater cannot finish preparing or replacing the app.
+    If this keeps happening, download the latest DMG and replace Mimo manually. This can happen when the local updater cannot finish preparing or replacing the app.
     """
 
     static func isNoUpdateError(_ error: NSError) -> Bool {

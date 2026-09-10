@@ -17,27 +17,34 @@ enum TextCaretIndicatorPlacement {
     }
 
     static func frame(
-        beside caretFrame: CGRect,
+        above inputFrame: CGRect,
         size: CGSize,
         visibleFrames: [CGRect],
         fallback: CGRect,
         gap: CGFloat = gap
     ) -> CGRect {
-        let caretPoint = CGPoint(x: caretFrame.midX, y: caretFrame.midY)
-        let visibleFrame = visibleFrames.first(where: { $0.contains(caretPoint) }) ?? fallback
-        var x = caretFrame.maxX + gap
-        if x + size.width > visibleFrame.maxX {
-            x = caretFrame.minX - gap - size.width
-        }
-        x = min(max(x, visibleFrame.minX), visibleFrame.maxX - size.width)
-        let proposedY = caretFrame.midY - size.height / 2
+        let visibleFrame = FloatingIndicatorController.visibleFrameForCustomIndicator(
+            customPositionCenter: nil,
+            indicatorFrame: inputFrame,
+            savedPositionCenter: nil,
+            availableVisibleFrames: visibleFrames,
+            fallback: fallback
+        )
+        let x = min(max(inputFrame.midX - size.width / 2, visibleFrame.minX), visibleFrame.maxX - size.width)
+        // Keep the input unobstructed. When it touches the top of a display,
+        // use the space below it; a full-screen editor falls back to the edge.
+        let aboveY = inputFrame.maxY + gap
+        let belowY = inputFrame.minY - gap - size.height
+        let proposedY = aboveY + size.height <= visibleFrame.maxY
+            ? aboveY
+            : (belowY >= visibleFrame.minY ? belowY : aboveY)
         let y = min(max(proposedY, visibleFrame.minY), visibleFrame.maxY - size.height)
         return CGRect(origin: CGPoint(x: x, y: y), size: size)
     }
 }
 
-private enum AccessibilityTextCaretLocator {
-    static func currentCaretFrame(screens: [NSScreen] = NSScreen.screens) -> CGRect? {
+private enum AccessibilityTextInputLocator {
+    static func currentInputFrame(screens: [NSScreen] = NSScreen.screens) -> CGRect? {
         guard let primaryScreenTop = screens.first?.frame.maxY else { return nil }
         let system = AXUIElementCreateSystemWide()
         var focusedValue: CFTypeRef?
@@ -49,6 +56,20 @@ private enum AccessibilityTextCaretLocator {
         let focusedValue,
         CFGetTypeID(focusedValue) == AXUIElementGetTypeID() else { return nil }
         let focused = focusedValue as! AXUIElement
+        AXUIElementSetMessagingTimeout(focused, 0.1)
+
+        // Prefer the editable field's bounds, so the pill stays above the
+        // text box instead of moving alongside every newly inserted word.
+        var roleValue: CFTypeRef?
+        AXUIElementCopyAttributeValue(focused, kAXRoleAttribute as CFString, &roleValue)
+        let role = roleValue as? String
+        if role == kAXTextFieldRole || role == kAXTextAreaRole || role == kAXComboBoxRole,
+           let fieldFrame = frame(of: focused) {
+            return TextCaretIndicatorPlacement.appKitRect(
+                fromAccessibility: fieldFrame,
+                primaryScreenTop: primaryScreenTop
+            )
+        }
 
         var rangeValue: CFTypeRef?
         guard AXUIElementCopyAttributeValue(
@@ -99,6 +120,24 @@ private enum AccessibilityTextCaretLocator {
             fromAccessibility: accessibilityRect,
             primaryScreenTop: primaryScreenTop
         )
+    }
+
+    private static func frame(of element: AXUIElement) -> CGRect? {
+        var positionValue: CFTypeRef?
+        var sizeValue: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionValue) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let positionValue, let sizeValue,
+              CFGetTypeID(positionValue) == AXValueGetTypeID(),
+              CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &position),
+              AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) else { return nil }
+        let rect = CGRect(origin: position, size: size)
+        guard rect.isFinite, size.width > 0, size.height > 0,
+              size.width < 10_000, size.height < 10_000 else { return nil }
+        return rect
     }
 }
 
@@ -153,11 +192,20 @@ private final class HoverIndicatorView: NSView {
     /// visible grip (resting) or pill + capsule (hovered) should intercept
     /// input. Outside those rects clicks fall through to apps underneath.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        if let owner, !owner.pointerInteractiveRect(in: bounds).contains(point) {
+        // AppKit supplies this point in the superview's coordinates. The pill
+        // is offset inside the window while the live transcript is expanded.
+        let localPoint = convert(point, from: superview)
+        if let owner, !owner.pointerInteractiveRect(in: bounds).contains(localPoint) {
             return nil
         }
-        return super.hitTest(point)
+        guard super.hitTest(point) != nil else { return nil }
+        // Labels, icons, and waveform chrome are decorative. Keep the pill's
+        // click-versus-drag handling together instead of sending its gestures
+        // to an NSTextField or NSImageView beneath the pointer.
+        return self
     }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -192,7 +240,7 @@ private final class HoverIndicatorView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         didDrag = false
-        mouseDownScreenLocation = NSEvent.mouseLocation
+        mouseDownScreenLocation = window?.convertPoint(toScreen: event.locationInWindow)
         owner?.pointerInteractionBegan()
         windowOriginAtMouseDown = window?.frame.origin
     }
@@ -200,9 +248,8 @@ private final class HoverIndicatorView: NSView {
     override func mouseDragged(with event: NSEvent) {
         guard owner?.allowsManualDrag == true,
               let window,
-              let mouseDownScreenLocation,
-              let windowOriginAtMouseDown else { return }
-        let currentScreenLocation = NSEvent.mouseLocation
+              let mouseDownScreenLocation else { return }
+        let currentScreenLocation = window.convertPoint(toScreen: event.locationInWindow)
         let deltaX = currentScreenLocation.x - mouseDownScreenLocation.x
         let deltaY = currentScreenLocation.y - mouseDownScreenLocation.y
         guard didDrag || FloatingIndicatorPointerIntent.isDrag(
@@ -211,7 +258,12 @@ private final class HoverIndicatorView: NSView {
         ) else { return }
         if !didDrag {
             owner?.pointerDragBegan()
+            // Collapsing the transcript changes the window origin while the
+            // indicator stays put. Start from that compact origin so the pill
+            // remains under the pointer instead of jumping by the popup size.
+            windowOriginAtMouseDown = window.frame.origin
         }
+        guard let windowOriginAtMouseDown else { return }
         didDrag = true
         window.setFrameOrigin(
             NSPoint(
@@ -292,6 +344,7 @@ final class FloatingIndicatorController: NSObject {
     private var hoverExitWorkItem: DispatchWorkItem?
     private let configStore: ConfigStore
     private var isMeetingRecording = false
+    private var isMeetingProcessing = false
     private var isMeetingRecordingPaused = false
     private var isMeetingTranscriptManuallyDismissed = false
     private lazy var meetingTranscriptPanel = FloatingMeetingTranscriptPanelController(
@@ -316,6 +369,7 @@ final class FloatingIndicatorController: NSObject {
     private var amplitudeTimer: Timer?
     private var caretTrackingTimer: Timer?
     private var activeTextCaretFrame: CGRect?
+    private let textInputFrameProvider: () -> CGRect?
     private var smoothedAmplitude: CGFloat = 0
     private var waveformAnimationMode: WaveformAnimationMode = .level
     private var recordingWaveformMode: WaveformAnimationMode = .level
@@ -343,8 +397,12 @@ final class FloatingIndicatorController: NSObject {
         case waiting
     }
 
-    init(configStore: ConfigStore) {
+    init(
+        configStore: ConfigStore,
+        textInputFrameProvider: (() -> CGRect?)? = nil
+    ) {
         self.configStore = configStore
+        self.textInputFrameProvider = textInputFrameProvider ?? { AccessibilityTextInputLocator.currentInputFrame() }
         super.init()
     }
 
@@ -354,8 +412,10 @@ final class FloatingIndicatorController: NSObject {
         indicatorScreenFrame
     }
 
+    var pointerInteractionViewForTesting: NSView? { contentView }
+
     fileprivate var allowsManualDrag: Bool {
-        state == .idle || isMeetingRecording
+        state == .idle || isMeetingRecording || isMeetingProcessing
     }
 
     func pointerDragBegan() {
@@ -565,7 +625,15 @@ final class FloatingIndicatorController: NSObject {
         hideInstructionProgress()
         transcribingTitle = title
         guard state == .transcribing else { return }
-        setState(.transcribing, config: config)
+        setState(.transcribing, config: config, meetingProcessing: isMeetingProcessing)
+    }
+
+    func showMeetingProcessingStatus(_ title: String, config: AppConfig) {
+        instructionTranscriptText = nil
+        instructionTranscriptShowsProgress = false
+        hideInstructionProgress()
+        transcribingTitle = title
+        setState(.transcribing, config: config, meetingProcessing: true)
     }
 
     func showComputerUseTranscript(_ transcript: String, config: AppConfig) {
@@ -599,7 +667,7 @@ final class FloatingIndicatorController: NSObject {
         setState(.transcribing, config: config)
     }
 
-    func setState(_ state: DictationState, config: AppConfig) {
+    func setState(_ state: DictationState, config: AppConfig, meetingProcessing: Bool = false) {
         lastLoadedConfig = config
         let previousState = self.state
         let previousHover = isHovered
@@ -608,6 +676,7 @@ final class FloatingIndicatorController: NSObject {
             exitComputerUseCursorMode(restoreFrame: false)
         }
         self.state = state
+        isMeetingProcessing = meetingProcessing
         updateCaretTracking(for: state)
         if state != .idle {
             hideShortcutPillChrome()
@@ -632,7 +701,10 @@ final class FloatingIndicatorController: NSObject {
             return
         }
         if panel == nil {
-            createPanel(config: config)
+            // A newly shown window has no visible idle frame to animate from.
+            // Start at the requested size so its content and screen position
+            // remain aligned when restoring a saved recording position.
+            createPanel(config: config, initialState: state)
         }
         guard let panel, let contentView, let iconLabel, let textLabel else { return }
 
@@ -656,6 +728,8 @@ final class FloatingIndicatorController: NSObject {
         let customPositionCenter: CGPoint?
         if previousState == .idle,
            state != .idle,
+           !isMeetingRecording,
+           !isMeetingProcessing,
            config.indicatorAnchor == .custom,
            let currentFrame = indicatorScreenFrame {
             customPositionCenter = Self.positionCenter(
@@ -678,15 +752,20 @@ final class FloatingIndicatorController: NSObject {
             isHovered: isHovered
         )
 
+        // Commit window and content geometry together. Animating the window
+        // while its content already has the next size shifts the apparent
+        // center, and a drag during that transition saves the wrong anchor.
+        panel.setFrame(targetFrame, display: true)
+        containerView?.frame = NSRect(origin: .zero, size: targetFrame.size)
+        contentView.frame = NSRect(origin: .zero, size: targetFrame.size)
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = duration
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             context.allowsImplicitAnimation = true
 
-            panel.animator().setFrame(targetFrame, display: true)
             panel.animator().alphaValue = style.alpha
 
-            contentView.animator().frame = NSRect(origin: .zero, size: targetFrame.size)
             contentView.layer?.cornerRadius = targetFrame.height / 2
             contentView.layer?.backgroundColor = style.background.cgColor
             contentView.layer?.borderWidth = 1.0
@@ -933,10 +1012,18 @@ final class FloatingIndicatorController: NSObject {
 
     func showLoading(_ message: String) {
         hideShortcutPillChrome()
+        hideMeetingTranscript()
         let config = configStore.load()
         if panel == nil { createPanel(config: config) }
         guard let panel, let contentView, let textLabel else { return }
-        guard let screen = NSScreen.main?.visibleFrame else { return }
+        guard let mainVisibleFrame = NSScreen.main?.visibleFrame else { return }
+        let screen = Self.visibleFrameForCustomIndicator(
+            customPositionCenter: nil,
+            indicatorFrame: indicatorScreenFrame,
+            savedPositionCenter: config.indicatorOrigin.map { CGPoint(x: $0.x, y: $0.y) },
+            availableVisibleFrames: NSScreen.screens.map(\.visibleFrame),
+            fallback: mainVisibleFrame
+        )
 
         isShowingLoading = true
         preservesCollapsedLeftEdge = false
@@ -967,14 +1054,16 @@ final class FloatingIndicatorController: NSObject {
         tintLayer?.backgroundColor = MuesliTheme.indicatorBaseNSColor.withAlphaComponent(0.72).cgColor
         applyTintLayerGeometry(size: loadingSize, radius: loadingSize.height / 2)
 
+        panel.setFrame(targetFrame, display: true)
+        containerView?.frame = NSRect(origin: .zero, size: loadingSize)
+        contentView.frame = NSRect(origin: .zero, size: loadingSize)
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.18
             context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
             context.allowsImplicitAnimation = true
 
-            panel.animator().setFrame(targetFrame, display: true)
             panel.animator().alphaValue = 1.0
-            contentView.animator().frame = NSRect(origin: .zero, size: loadingSize)
             contentView.layer?.cornerRadius = loadingSize.height / 2
             contentView.layer?.backgroundColor = NSColor.clear.cgColor
             contentView.layer?.borderWidth = 1.0
@@ -1315,7 +1404,7 @@ final class FloatingIndicatorController: NSObject {
         // Cache: hit-testing runs on the pointer hot path; reading + decoding
         // config from disk per event would add avoidable main-thread latency.
         let config = lastLoadedConfig ?? configStore.load()
-        guard state == .idle, config.indicatorHoverStyle == .shortcutPill else { return bounds }
+        guard state == .idle, !isShowingLoading, config.indicatorHoverStyle == .shortcutPill else { return bounds }
         let placement = idleHoverPlacement(for: config.indicatorAnchor)
         if isHovered {
             let (pill, _, _, _) = shortcutPillHoverFrame(
@@ -1672,9 +1761,9 @@ final class FloatingIndicatorController: NSObject {
         }
     }
 
-    private func createPanel(config: AppConfig) {
+    private func createPanel(config: AppConfig, initialState: DictationState = .idle) {
         let panel = InteractiveFloatingPanel(
-            contentRect: frameForState(.idle, config: config),
+            contentRect: frameForState(initialState, config: config),
             styleMask: .borderless,
             backing: .buffered,
             defer: false
@@ -1685,6 +1774,7 @@ final class FloatingIndicatorController: NSObject {
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
         panel.ignoresMouseEvents = false
+        panel.isMovable = true
         panel.isMovableByWindowBackground = false
         panel.becomesKeyOnlyIfNeeded = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
@@ -1964,7 +2054,7 @@ final class FloatingIndicatorController: NSObject {
         return allowedRect.contains(center)
     }
 
-    static func visibleFrameForCustomIndicator(
+    nonisolated static func visibleFrameForCustomIndicator(
         customPositionCenter: CGPoint?,
         indicatorFrame: NSRect?,
         savedPositionCenter: CGPoint?,
@@ -2006,10 +2096,24 @@ final class FloatingIndicatorController: NSObject {
         guard let mainVisibleFrame = NSScreen.main?.visibleFrame else {
             return NSRect(x: 0, y: 0, width: 64, height: 28)
         }
+        // Dictation temporarily follows the focused text field. A meeting's
+        // recording and processing phases always return to its saved anchor.
+        let savedPositionCenter = config.indicatorOrigin.map { CGPoint(x: $0.x, y: $0.y) }
+        let meetingPositionCenter = (isMeetingRecording || isMeetingProcessing)
+            ? savedPositionCenter
+            : nil
         let screen: NSRect
-        if config.indicatorAnchor == .custom {
+        if shouldFollowTextCaret(for: state), let activeTextCaretFrame {
             screen = Self.visibleFrameForCustomIndicator(
-                customPositionCenter: customPositionCenter,
+                customPositionCenter: nil,
+                indicatorFrame: activeTextCaretFrame,
+                savedPositionCenter: nil,
+                availableVisibleFrames: NSScreen.screens.map(\.visibleFrame),
+                fallback: mainVisibleFrame
+            )
+        } else if config.indicatorAnchor == .custom {
+            screen = Self.visibleFrameForCustomIndicator(
+                customPositionCenter: meetingPositionCenter ?? customPositionCenter ?? (state == .idle ? savedPositionCenter : nil),
                 indicatorFrame: indicatorScreenFrame,
                 savedPositionCenter: config.indicatorOrigin.map { CGPoint(x: $0.x, y: $0.y) },
                 availableVisibleFrames: NSScreen.screens.map(\.visibleFrame),
@@ -2052,7 +2156,7 @@ final class FloatingIndicatorController: NSObject {
 
         if shouldFollowTextCaret(for: state), let activeTextCaretFrame {
             return TextCaretIndicatorPlacement.frame(
-                beside: activeTextCaretFrame,
+                above: activeTextCaretFrame,
                 size: size,
                 visibleFrames: NSScreen.screens.map(\.visibleFrame),
                 fallback: mainVisibleFrame
@@ -2078,7 +2182,9 @@ final class FloatingIndicatorController: NSObject {
         // Non-idle custom state transitions continue to resize around the
         // current on-screen center. Preset anchors always resolve from config.
         let center: CGPoint
-        if config.indicatorAnchor == .custom, let customPositionCenter {
+        if config.indicatorAnchor == .custom, let meetingPositionCenter {
+            center = meetingPositionCenter
+        } else if config.indicatorAnchor == .custom, let customPositionCenter {
             // When dictation starts from the left-anchored hover pill, keep the
             // compact icon position rather than jumping to the hover midpoint.
             center = customPositionCenter
@@ -2106,7 +2212,7 @@ final class FloatingIndicatorController: NSObject {
     }
 
     private func shouldFollowTextCaret(for state: DictationState) -> Bool {
-        state != .idle && !isMeetingRecording && !isComputerUseCursorMode
+        state != .idle && !isMeetingRecording && !isMeetingProcessing && !isComputerUseCursorMode
     }
 
     private func updateCaretTracking(for state: DictationState) {
@@ -2114,7 +2220,7 @@ final class FloatingIndicatorController: NSObject {
             stopCaretTracking()
             return
         }
-        if let frame = AccessibilityTextCaretLocator.currentCaretFrame() {
+        if let frame = textInputFrameProvider() {
             activeTextCaretFrame = frame
         }
         guard caretTrackingTimer == nil else { return }
@@ -2129,7 +2235,7 @@ final class FloatingIndicatorController: NSObject {
 
     private func refreshCaretAnchoredFrame() {
         guard shouldFollowTextCaret(for: state), !isDragging,
-              let frame = AccessibilityTextCaretLocator.currentCaretFrame() else { return }
+              let frame = textInputFrameProvider() else { return }
         activeTextCaretFrame = frame
         guard let panel, let config = lastLoadedConfig else { return }
         let targetFrame = frameForState(state, config: config)

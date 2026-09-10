@@ -788,7 +788,7 @@ struct MeetingsView: View {
                     systemImage: "waveform.and.mic"
                 )
                 liveMeetingCapability(
-                    "GPT-5.4 Mini",
+                    SummaryModelPreset.chatGPTModelLabel(appState.config.chatGPTModel),
                     detail: appState.isChatGPTAuthenticated ? "ChatGPT subscription" : "sign in in Settings",
                     systemImage: "sparkles"
                 )

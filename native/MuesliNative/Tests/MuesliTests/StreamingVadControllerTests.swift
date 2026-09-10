@@ -123,7 +123,7 @@ struct StreamingVadControllerTests {
             }
         )
 
-        controller.onChunkBoundary = {
+        controller.onChunkBoundary = { _ in
             boundaryProbe.boundaryTriggered()
         }
 
@@ -161,7 +161,7 @@ struct StreamingVadControllerTests {
             }
         )
 
-        controller.onChunkBoundary = {
+        controller.onChunkBoundary = { _ in
             Task { await probe.boundaryTriggered() }
         }
 

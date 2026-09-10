@@ -102,6 +102,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$REQUIRE_NOTARIZED" == "1" && "$SKIP_DMG" == "1" ]]; then
+  echo "ERROR: --require-notarized cannot be combined with --skip-dmg." >&2
+  exit 2
+fi
+
 SHORT_VERSION="${SHORT_VERSION:-$VERSION}"
 ARTIFACT_VERSION="${ARTIFACT_VERSION:-$VERSION}"
 
@@ -396,35 +401,8 @@ fi
 echo "DMG code signature OK."
 
 if [[ "$REQUIRE_NOTARIZED" == "1" ]]; then
-  if ! APP_SPCTL_RESULT="$(spctl -a -vv "$APP_PATH" 2>&1)"; then
-    :
-  fi
-  echo "$APP_SPCTL_RESULT"
-  if ! echo "$APP_SPCTL_RESULT" | grep -q "accepted"; then
-    echo "ERROR: app inside DMG was rejected by Gatekeeper." >&2
-    exit 1
-  fi
-
-  echo "Validating app staple..."
-  if ! xcrun stapler validate "$APP_PATH"; then
-    echo "ERROR: app inside DMG does not have a valid staple." >&2
-    exit 1
-  fi
-
-  if ! DMG_SPCTL_RESULT="$(spctl -a -vv -t open --context context:primary-signature "$DMG_PATH" 2>&1)"; then
-    :
-  fi
-  echo "$DMG_SPCTL_RESULT"
-  if ! echo "$DMG_SPCTL_RESULT" | grep -q "accepted"; then
-    echo "ERROR: DMG was rejected by Gatekeeper." >&2
-    exit 1
-  fi
-
-  echo "Validating DMG staple..."
-  if ! xcrun stapler validate "$DMG_PATH"; then
-    echo "ERROR: DMG does not have a valid staple." >&2
-    exit 1
-  fi
+  "$ROOT/scripts/verify_notarized_artifact.sh" --app "$APP_PATH"
+  "$ROOT/scripts/verify_notarized_artifact.sh" --dmg "$DMG_PATH"
   echo "Notarization/staple checks OK."
 fi
 

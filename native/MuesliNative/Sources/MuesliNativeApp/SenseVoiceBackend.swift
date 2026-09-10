@@ -64,9 +64,18 @@ actor SenseVoiceTranscriber {
     }
 
     func transcribe(wavURL: URL) async throws -> (text: String, processingTime: Double) {
+        // A meeting can switch to this model while background preloading is
+        // still running. Await readiness instead of dropping that first chunk.
+        try Task.checkCancellation()
+        try await loadModels()
+        try Task.checkCancellation()
         guard let manager else { throw TranscriberError.notLoaded }
         let start = CFAbsoluteTimeGetCurrent()
-        let text = try await manager.transcribe(audioURL: wavURL)
+        let converter = AudioConverter(sampleRate: Double(SenseVoiceConfig.sampleRate))
+        let samples = try converter.resampleAudioFile(wavURL)
+        let text = try await SenseVoiceAudioTranscription.transcribe(samples: samples) { chunk in
+            try await manager.transcribe(audio: chunk)
+        }
         let processingTime = CFAbsoluteTimeGetCurrent() - start
         return (text, processingTime)
     }

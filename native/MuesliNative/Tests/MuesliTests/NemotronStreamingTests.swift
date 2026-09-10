@@ -851,7 +851,8 @@ struct Nemotron35BackendMetadataTests {
         #expect(!desc.contains("Experimental"))
         #expect(desc.contains("hold-to-talk"))
         #expect(desc.contains("hands-free"))
-        #expect(desc.contains("Hindi"))
+        #expect(desc.contains("32 supported locales"))
+        #expect(desc.contains("Mandarin Chinese and English"))
         #expect(desc.contains("punctuation"))
         #expect(desc.contains("does not go back to correct"))
     }

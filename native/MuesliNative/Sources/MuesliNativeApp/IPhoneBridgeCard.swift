@@ -247,7 +247,6 @@ struct IPhoneBridgeCard: View {
         }) {
             IPhoneBridgeQRCodeSheet(
                 deepLinkURL: IPhoneBridgeLinks.iOSSyncDeepLinkURL,
-                installURL: IPhoneBridgeLinks.installURL,
                 isWaitingForDevice: appState.iCloudBridgeCompanionDiscoveryState == .waiting
             )
         }
@@ -262,7 +261,7 @@ struct IPhoneBridgeCard: View {
                 controller.reconnectICloudSyncToCurrentAccount()
             }
         } message: {
-            Text("Muesli will reconnect this Mac to the currently signed-in iCloud account and resync eligible text. Local history and audio stay on this Mac.")
+            Text("\(AppIdentity.displayName) will reconnect this Mac to the currently signed-in iCloud account and resync eligible text. Local history and audio stay on this Mac.")
         }
         .alert("Reset iCloud sync?", isPresented: $isResetConfirmationPresented) {
             Button("Cancel", role: .cancel) {}
@@ -270,7 +269,7 @@ struct IPhoneBridgeCard: View {
                 controller.resetICloudSync()
             }
         } message: {
-            Text("Muesli will turn off sync and clear this Mac's local iCloud sync state. Local history and audio stay on this Mac, and CloudKit data is not deleted. Turn sync on afterward to set up the currently signed-in iCloud account.")
+            Text("\(AppIdentity.displayName) will turn off sync and clear this Mac's local iCloud sync state. Local history and audio stay on this Mac, and CloudKit data is not deleted. Turn sync on afterward to set up the currently signed-in iCloud account.")
         }
     }
 
@@ -382,7 +381,7 @@ struct IPhoneBridgeCard: View {
                 return "Waiting for your iPhone or iPad…"
             }
             if appState.iCloudBridgeCompanionDiscoveryState == .timedOut {
-                return "Couldn't find your device. Open Muesli there, then try again."
+                return "Couldn't find your device. Open the companion app there, then try again."
             }
             return "Connect another device to sync text."
         case .checkingICloud:
@@ -448,7 +447,7 @@ struct IPhoneBridgeCard: View {
             break
         }
         if flowAction == .waitingForDevice {
-            return "Waiting for Muesli on your other device"
+            return "Waiting for the companion app on your other device"
         }
         switch bridgeState {
         case .active:
@@ -501,7 +500,6 @@ struct IPhoneBridgeCard: View {
 
 struct IPhoneBridgeQRCodeSheet: View {
     let deepLinkURL: URL
-    let installURL: URL
     let isWaitingForDevice: Bool
     @Environment(\.dismiss) private var dismiss
     @State private var didCopySetupLink = false
@@ -560,9 +558,6 @@ struct IPhoneBridgeQRCodeSheet: View {
             }
 
             HStack(spacing: MuesliTheme.spacing8) {
-                Button("Open iPhone app page") { NSWorkspace.shared.open(installURL) }
-                    .buttonStyle(.bordered)
-
                 Button(didCopySetupLink ? "Copied!" : "Copy setup link") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(deepLinkURL.absoluteString, forType: .string)

@@ -33,7 +33,9 @@ actor Nemotron35StreamingTranscriber: NemotronStreamingTranscribing {
     /// Multilingual config from metadata.json (multilingual/2240ms variant).
     /// Geometry: chunk_mel_frames 224 + pre_encode_cache 9 = total 233; 8× subsampling
     /// → 28 encoder frames/chunk; chunkSamples = 2240ms · 16kHz = 35840.
-    private var config: NemotronRNNTConfig {
+    private var config: NemotronRNNTConfig { decodingConfig(promptId: promptId) }
+
+    private func decodingConfig(promptId: Int32) -> NemotronRNNTConfig {
         NemotronRNNTConfig(
             chunkSamples: 35840,
             cacheChannelFrames: 42,      // att_context left
@@ -165,6 +167,12 @@ actor Nemotron35StreamingTranscriber: NemotronStreamingTranscribing {
 
     /// Process one 2240ms audio chunk (35840 samples) and return newly decoded text.
     func transcribeChunk(samples: [Float], state: inout StreamState) async throws -> String {
+        try await transcribeChunk(samples: samples, state: &state, config: config)
+    }
+
+    private func transcribeChunk(
+        samples: [Float], state: inout StreamState, config: NemotronRNNTConfig
+    ) async throws -> String {
         guard loaded, let preprocessor, let encoder, let decoder, let joint else {
             throw TranscriberError.notLoaded
         }
@@ -189,19 +197,22 @@ actor Nemotron35StreamingTranscriber: NemotronStreamingTranscribing {
 
     // MARK: - Convenience (full-file transcription)
 
-    func transcribe(wavURL: URL) async throws -> (text: String, processingTime: Double) {
+    func transcribe(wavURL: URL, promptId: Int32? = nil) async throws -> (text: String, processingTime: Double) {
         guard loaded else { throw TranscriberError.notLoaded }
+        // Freeze language per file. Bilingual meeting chunks use auto without
+        // mutating the dictation preference or a concurrent stream's language.
+        let config = decodingConfig(promptId: promptId ?? self.promptId)
 
         let samples = try nemotronLoadWavAsFloats(url: wavURL)
         let start = CFAbsoluteTimeGetCurrent()
 
-        var state = try makeStreamState()
+        var state = try nemotronMakeStreamState(config: config)
         var sampleOffset = 0
 
         while sampleOffset < samples.count {
             let chunkEnd = min(sampleOffset + config.chunkSamples, samples.count)
             let chunk = Array(samples[sampleOffset..<chunkEnd])
-            _ = try await transcribeChunk(samples: chunk, state: &state)
+            _ = try await transcribeChunk(samples: chunk, state: &state, config: config)
             sampleOffset += config.chunkSamples
         }
 

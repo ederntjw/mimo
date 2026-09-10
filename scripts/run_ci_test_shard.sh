@@ -27,12 +27,16 @@ case "${shard}" in
       OpenRouterAuthTests
       SettingsPermissionRefreshReasonTests
       FloatingIndicatorVisibilityTests
+      FloatingIndicatorPointerInteractionTests
+      FloatingMeetingTranscriptTests
       IndicatorFrameSizeTests
       WindowAppearanceTests
       VisualThemeTests
       MimoAccountSyncTests
       OpenAILogoShapeTests
       StandardMenuShortcutTests
+      ApplicationTerminationCoordinatorTests
+      AppReopenTests
       MeetingChunkCollectorTests
       AppConfigTests
       CGPointCodableTests
@@ -41,7 +45,6 @@ case "${shard}" in
       CustomWordDictionaryTests
       ModelDownloadCoordinatorTests
       IndicASRBackendTests
-      ContributionMilestoneTests
     )
     ;;
   dictation-transcription)
@@ -62,6 +65,8 @@ case "${shard}" in
       Nemotron35BackendMetadataTests
       Nemotron35LanguageTests
       WhisperKitLanguageTests
+      ParakeetLanguageTests
+      LocalModelHardwareTests
       SpeechSegmentTests
       SpeechTranscriptionResultTests
       TranscriptionCoordinatorTests
@@ -102,8 +107,12 @@ case "${shard}" in
       MeetingFollowUpThreadTests
       MeetingFollowUpSummaryPromptTests
       LiveMeetingAssistantTests
+      BilingualMeetingTests
       LiveSessionKindTests
       MeetingSummaryClientTests
+      MeetingTranscriptReviewTests
+      MeetingFinalTranscriptionTests
+      MeetingTranscriptionPlanTests
       MeetingsNavigationTests
       MeetingBrowserLogicTests
       MeetingNotesInlineMarkdownTests

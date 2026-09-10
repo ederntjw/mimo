@@ -337,7 +337,7 @@ struct FeatureTourInvitationView: View {
                         .frame(width: 26, height: 26)
 
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("MUESLI \(tour.displayVersion)")
+                        Text("\(AppIdentity.displayName.uppercased()) \(tour.displayVersion)")
                             .font(.system(size: 10, weight: .bold))
                             .foregroundStyle(MuesliTheme.accent)
                         Text("Want a quick tour of what’s new?")

@@ -1,9 +1,58 @@
 import SwiftUI
 import MuesliCore
 
+private struct MuesliThemeColorToken {
+    let dark: Int
+    let light: Int
+    var darkAlpha: CGFloat = 1
+    var lightAlpha: CGFloat = 1
+
+    var color: Color { Color(nsColor: nsColor) }
+    var lightColor: Color { Color(nsColor: NSColor(hex: light, alpha: lightAlpha)) }
+
+    var nsColor: NSColor {
+        NSColor(name: nil) { appearance in
+            let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return NSColor(
+                hex: isDark ? dark : light,
+                alpha: isDark ? darkAlpha : lightAlpha
+            )
+        }
+    }
+}
+
+private struct MuesliVisualPalette {
+    let backgroundDeep: MuesliThemeColorToken
+    let backgroundBase: MuesliThemeColorToken
+    let backgroundRaised: MuesliThemeColorToken
+    let backgroundHover: MuesliThemeColorToken
+    let surfacePrimary: MuesliThemeColorToken
+    let surfaceSelected: MuesliThemeColorToken
+    let surfaceBorder: MuesliThemeColorToken
+    let textPrimary: MuesliThemeColorToken
+    let textSecondary: MuesliThemeColorToken
+    let textTertiary: MuesliThemeColorToken
+    let accent: MuesliThemeColorToken
+    var recording = MuesliThemeColorToken(dark: 0xFF657C, light: 0xE53955)
+    var transcribing = MuesliThemeColorToken(dark: 0xFFC766, light: 0xD97706)
+    var success = MuesliThemeColorToken(dark: 0x45D6A8, light: 0x16876A)
+    var destructive = MuesliThemeColorToken(dark: 0xFF657C, light: 0xC92F49)
+    var streak = MuesliThemeColorToken(dark: 0xFFD071, light: 0xD97706)
+    var joinAction = MuesliThemeColorToken(dark: 0x45D6A8, light: 0x16876A)
+    var joinActionSecondary = MuesliThemeColorToken(dark: 0x2FA783, light: 0x116B55)
+}
+
 enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
     case classic
     case strawberryMilk
+    case cherryRibbon
+    case lavenderDream
+    case peachSorbet
+    case mintMacaron
+    case roseQuartz
+    case neonGrid
+    case auroraGlass
+    case solarFlare
 
     var id: String { rawValue }
 
@@ -11,6 +60,14 @@ enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .classic: "Classic"
         case .strawberryMilk: "Strawberry Milk"
+        case .cherryRibbon: "Cherry Ribbon"
+        case .lavenderDream: "Lavender Dream"
+        case .peachSorbet: "Peach Sorbet"
+        case .mintMacaron: "Mint Macaron"
+        case .roseQuartz: "Rose Quartz"
+        case .neonGrid: "Neon Grid"
+        case .auroraGlass: "Aurora Glass"
+        case .solarFlare: "Solar Flare"
         }
     }
 
@@ -18,6 +75,14 @@ enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .classic: "Clean, calm, and focused."
         case .strawberryMilk: "Blush pink, creamy, and extra sweet."
+        case .cherryRibbon: "Cherry red, soft pink, and playful."
+        case .lavenderDream: "Lilac, pearl, and quietly magical."
+        case .peachSorbet: "Peach, cream, and a warm coral glow."
+        case .mintMacaron: "Fresh mint with a berry-pink bow."
+        case .roseQuartz: "Dusty rose, pearl, and soft plum."
+        case .neonGrid: "Electric cyan on deep-space ink."
+        case .auroraGlass: "Iridescent teal with glassy depth."
+        case .solarFlare: "Hot orange, magenta, and midnight."
         }
     }
 
@@ -25,6 +90,14 @@ enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .classic: "waveform"
         case .strawberryMilk: "heart.fill"
+        case .cherryRibbon: "heart.circle.fill"
+        case .lavenderDream: "moon.stars.fill"
+        case .peachSorbet: "sun.haze.fill"
+        case .mintMacaron: "leaf.fill"
+        case .roseQuartz: "diamond.fill"
+        case .neonGrid: "square.grid.3x3.fill"
+        case .auroraGlass: "sparkles"
+        case .solarFlare: "sun.max.fill"
         }
     }
 
@@ -32,38 +105,47 @@ enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .classic: "muesli.icns"
         case .strawberryMilk: "mimo_strawberry_app_icon.png"
+        case .cherryRibbon, .lavenderDream, .peachSorbet, .mintMacaron, .roseQuartz,
+             .neonGrid, .auroraGlass, .solarFlare:
+            "muesli.icns"
         }
+    }
+
+    var usesCuteStyling: Bool {
+        switch self {
+        case .strawberryMilk, .cherryRibbon, .lavenderDream, .peachSorbet, .mintMacaron, .roseQuartz:
+            true
+        case .classic, .neonGrid, .auroraGlass, .solarFlare: false
+        }
+    }
+
+    var usesPackagedIconPreview: Bool {
+        self == .classic || self == .strawberryMilk
     }
 
     var previewBackground: Color {
         switch self {
         case .classic: Color(hex: 0xF0F4FA)
         case .strawberryMilk: Color(hex: 0xFFF0F5)
+        case .cherryRibbon, .lavenderDream, .peachSorbet, .mintMacaron, .roseQuartz,
+             .neonGrid, .auroraGlass, .solarFlare:
+            palette.backgroundDeep.lightColor
         }
     }
 
     var previewAccent: Color {
-        switch self {
-        case .classic: Color(hex: 0x2563EB)
-        case .strawberryMilk: Color(hex: 0xE94F8A)
-        }
+        palette.accent.lightColor
     }
 
     /// Preview cards use their light palettes even while Settings is in dark mode.
     /// Keeping their matching text colors with the preview tokens prevents the
     /// surrounding active theme from reducing card contrast.
     var previewTextPrimary: Color {
-        switch self {
-        case .classic: Color(hex: 0x152033)
-        case .strawberryMilk: Color(hex: 0x4A2434)
-        }
+        self == .classic ? Color(hex: 0x152033) : palette.textPrimary.lightColor
     }
 
     var previewTextSecondary: Color {
-        switch self {
-        case .classic: Color.black.opacity(0.58)
-        case .strawberryMilk: Color(hex: 0x765465)
-        }
+        self == .classic ? Color.black.opacity(0.58) : palette.textSecondary.lightColor
     }
 
     static func resolved(_ rawValue: String?) -> MuesliVisualTheme {
@@ -71,13 +153,203 @@ enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 
     func accentHex(afterSelecting currentAccentHex: String) -> String {
-        self == .strawberryMilk ? MuesliTheme.pinkAccentPresetHex : currentAccentHex
+        preferredAccentHex ?? currentAccentHex
+    }
+
+    var preferredAccentHex: String? {
+        switch self {
+        case .classic: nil
+        case .strawberryMilk: MuesliTheme.pinkAccentPresetHex
+        case .cherryRibbon: "c81e43"
+        case .lavenderDream: "7652b8"
+        case .peachSorbet: "c94f35"
+        case .mintMacaron: "a92f5b"
+        case .roseQuartz: "a83b6a"
+        case .neonGrid: "08788f"
+        case .auroraGlass: "08766e"
+        case .solarFlare: "c84a0b"
+        }
+    }
+
+    fileprivate var palette: MuesliVisualPalette {
+        switch self {
+        case .classic:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x0B0C0E, light: 0xF5F5F7),
+                backgroundBase: .init(dark: 0x161719, light: 0xFFFFFF),
+                backgroundRaised: .init(dark: 0x1C1D20, light: 0xF0F0F2),
+                backgroundHover: .init(dark: 0x232528, light: 0xE8E8EC),
+                surfacePrimary: .init(dark: 0x262830, light: 0xE5E5EA),
+                surfaceSelected: .init(dark: 0x2E3340, light: 0xD6DFFE),
+                surfaceBorder: .init(dark: 0xFFFFFF, light: 0x000000, darkAlpha: 0.07, lightAlpha: 0.08),
+                textPrimary: .init(dark: 0xFFFFFF, light: 0x000000, darkAlpha: 0.92, lightAlpha: 0.88),
+                textSecondary: .init(dark: 0xFFFFFF, light: 0x000000, darkAlpha: 0.62, lightAlpha: 0.55),
+                textTertiary: .init(dark: 0xFFFFFF, light: 0x000000, darkAlpha: 0.40, lightAlpha: 0.33),
+                accent: .init(dark: MuesliTheme.defaultAccentDarkHex, light: MuesliTheme.defaultAccentLightHex),
+                recording: .init(dark: 0xEF4444, light: 0xEF4444),
+                transcribing: .init(dark: 0xF59E0B, light: 0xF59E0B),
+                success: .init(dark: 0x34D399, light: 0x34D399),
+                destructive: .init(dark: 0xFF0000, light: 0xFF0000),
+                streak: .init(dark: 0xFF8000, light: 0xFF8000),
+                joinAction: .init(dark: 0x33B887, light: 0x33B887),
+                joinActionSecondary: .init(dark: 0x26946B, light: 0x26946B)
+            )
+        case .strawberryMilk:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x21151D, light: 0xF9DFE9),
+                backgroundBase: .init(dark: 0x2A1923, light: 0xFFF7FA),
+                backgroundRaised: .init(dark: 0x36222D, light: 0xFFFDFE),
+                backgroundHover: .init(dark: 0x4A2C3B, light: 0xF8D9E6),
+                surfacePrimary: .init(dark: 0x3B2632, light: 0xFFF0F5),
+                surfaceSelected: .init(dark: 0x553044, light: 0xFFD9E8),
+                surfaceBorder: .init(dark: 0xFFB3CE, light: 0xB44B72, darkAlpha: 0.25, lightAlpha: 0.25),
+                textPrimary: .init(dark: 0xFFF1F6, light: 0x4A2434),
+                textSecondary: .init(dark: 0xD8B6C5, light: 0x765465),
+                textTertiary: .init(dark: 0xAA8295, light: 0xA07E8E),
+                accent: .init(dark: 0xFF8CB8, light: 0xE94F8A),
+                recording: .init(dark: 0xFF8CB8, light: 0xE94F8A),
+                transcribing: .init(dark: 0xD7A0FF, light: 0xA75AC7),
+                success: .init(dark: 0x72D8BF, light: 0x2E9F87),
+                destructive: .init(dark: 0xFF8B96, light: 0xC7354B),
+                streak: .init(dark: 0xFFBE8E, light: 0xE87565),
+                joinAction: .init(dark: 0x72D8BF, light: 0x2E9F87),
+                joinActionSecondary: .init(dark: 0x58AD99, light: 0x267F6D)
+            )
+        case .cherryRibbon:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x210F18, light: 0xFFF0F3),
+                backgroundBase: .init(dark: 0x2A121C, light: 0xFFF9FA),
+                backgroundRaised: .init(dark: 0x381A24, light: 0xFFFFFF),
+                backgroundHover: .init(dark: 0x522333, light: 0xFFE1E8),
+                surfacePrimary: .init(dark: 0x431E2B, light: 0xFFF0F3),
+                surfaceSelected: .init(dark: 0x66263A, light: 0xFFD2DC),
+                surfaceBorder: .init(dark: 0xFF9FB4, light: 0xB42042, darkAlpha: 0.28, lightAlpha: 0.24),
+                textPrimary: .init(dark: 0xFFF5F7, light: 0x4A1825),
+                textSecondary: .init(dark: 0xE8BAC5, light: 0x7F4050),
+                textTertiary: .init(dark: 0xBF8594, light: 0xA06574),
+                accent: .init(dark: 0xFF6B86, light: 0xC81E43),
+                recording: .init(dark: 0xFF6B86, light: 0xC81E43),
+                transcribing: .init(dark: 0xFFBE7A, light: 0xD75C31)
+            )
+        case .lavenderDream:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x171225, light: 0xF3EAF8),
+                backgroundBase: .init(dark: 0x20172E, light: 0xFCF8FF),
+                backgroundRaised: .init(dark: 0x2B203B, light: 0xFFFFFF),
+                backgroundHover: .init(dark: 0x3A2B50, light: 0xEDE4F7),
+                surfacePrimary: .init(dark: 0x322443, light: 0xF5ECFC),
+                surfaceSelected: .init(dark: 0x493060, light: 0xE5D3F6),
+                surfaceBorder: .init(dark: 0xD8B4FE, light: 0x7C3FA3, darkAlpha: 0.26, lightAlpha: 0.23),
+                textPrimary: .init(dark: 0xFBF5FF, light: 0x352044),
+                textSecondary: .init(dark: 0xD5C2E5, light: 0x6F577F),
+                textTertiary: .init(dark: 0xA890B9, light: 0x90749F),
+                accent: .init(dark: 0xC9A3FF, light: 0x7652B8),
+                recording: .init(dark: 0xFF8CB8, light: 0xE94F8A),
+                transcribing: .init(dark: 0x80E1FF, light: 0x287FA3)
+            )
+        case .peachSorbet:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x211411, light: 0xFFEDE4),
+                backgroundBase: .init(dark: 0x2B1917, light: 0xFFF9F5),
+                backgroundRaised: .init(dark: 0x38211D, light: 0xFFFFFF),
+                backgroundHover: .init(dark: 0x512E27, light: 0xFFE1D3),
+                surfacePrimary: .init(dark: 0x412720, light: 0xFFF0E8),
+                surfaceSelected: .init(dark: 0x61382F, light: 0xFFD7C7),
+                surfaceBorder: .init(dark: 0xFFAD91, light: 0xB44731, darkAlpha: 0.27, lightAlpha: 0.23),
+                textPrimary: .init(dark: 0xFFF7F2, light: 0x49241B),
+                textSecondary: .init(dark: 0xE6BCAF, light: 0x7D5046),
+                textTertiary: .init(dark: 0xB98B7E, light: 0x9A6E63),
+                accent: .init(dark: 0xFF9B7A, light: 0xC94F35),
+                recording: .init(dark: 0xFF6B7D, light: 0xC72D4D),
+                transcribing: .init(dark: 0xFFD06E, light: 0xC4770F)
+            )
+        case .mintMacaron:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x10201C, light: 0xF0FAF5),
+                backgroundBase: .init(dark: 0x142A24, light: 0xFAFFFC),
+                backgroundRaised: .init(dark: 0x1C372F, light: 0xFFFFFF),
+                backgroundHover: .init(dark: 0x295044, light: 0xDDF3E9),
+                surfacePrimary: .init(dark: 0x214037, light: 0xEBF8F2),
+                surfaceSelected: .init(dark: 0x2F5B4D, light: 0xCFEBDD),
+                surfaceBorder: .init(dark: 0xA7E5C9, light: 0x2E8068, darkAlpha: 0.26, lightAlpha: 0.22),
+                textPrimary: .init(dark: 0xF3FFF9, light: 0x173B31),
+                textSecondary: .init(dark: 0xB7D9CC, light: 0x507469),
+                textTertiary: .init(dark: 0x82A99A, light: 0x6F9588),
+                accent: .init(dark: 0xFF9BB9, light: 0xA92F5B),
+                recording: .init(dark: 0xFF8FAF, light: 0xB92F5D),
+                transcribing: .init(dark: 0xCBA8FF, light: 0x7950B5)
+            )
+        case .roseQuartz:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x21141C, light: 0xF8EAF0),
+                backgroundBase: .init(dark: 0x2B1925, light: 0xFFF9FB),
+                backgroundRaised: .init(dark: 0x37212F, light: 0xFFFFFF),
+                backgroundHover: .init(dark: 0x4B2C3E, light: 0xF4DDE7),
+                surfacePrimary: .init(dark: 0x3E2634, light: 0xFBEAF1),
+                surfaceSelected: .init(dark: 0x583047, light: 0xF0CADB),
+                surfaceBorder: .init(dark: 0xE9A5C3, light: 0x934466, darkAlpha: 0.27, lightAlpha: 0.23),
+                textPrimary: .init(dark: 0xFFF5FA, light: 0x432333),
+                textSecondary: .init(dark: 0xDEB6C9, light: 0x765465),
+                textTertiary: .init(dark: 0xAD8095, light: 0x9B7587),
+                accent: .init(dark: 0xFF9CC5, light: 0xA83B6A),
+                recording: .init(dark: 0xFF7EAB, light: 0xB52F64),
+                transcribing: .init(dark: 0xD4A5FF, light: 0x7848A8)
+            )
+        case .neonGrid:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x03070D, light: 0xEAFBFF),
+                backgroundBase: .init(dark: 0x071019, light: 0xF7FDFF),
+                backgroundRaised: .init(dark: 0x0C1723, light: 0xFFFFFF),
+                backgroundHover: .init(dark: 0x112638, light: 0xDDF6FC),
+                surfacePrimary: .init(dark: 0x0F1F2D, light: 0xE4F8FC),
+                surfaceSelected: .init(dark: 0x12384A, light: 0xC7F0FA),
+                surfaceBorder: .init(dark: 0x36E1FF, light: 0x087F99, darkAlpha: 0.28, lightAlpha: 0.22),
+                textPrimary: .init(dark: 0xE9FCFF, light: 0x0B2A33),
+                textSecondary: .init(dark: 0x9BC3CE, light: 0x3E6972),
+                textTertiary: .init(dark: 0x668B95, light: 0x6B8D94),
+                accent: .init(dark: 0x32E3FF, light: 0x08788F),
+                transcribing: .init(dark: 0xB77DFF, light: 0x7C3AED)
+            )
+        case .auroraGlass:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x08111A, light: 0xEAFBF7),
+                backgroundBase: .init(dark: 0x0C1720, light: 0xF6FFFD),
+                backgroundRaised: .init(dark: 0x12212C, light: 0xFFFFFF),
+                backgroundHover: .init(dark: 0x183440, light: 0xDDF7F2),
+                surfacePrimary: .init(dark: 0x162A35, light: 0xE4F7F3),
+                surfaceSelected: .init(dark: 0x17483F, light: 0xC9EEE6),
+                surfaceBorder: .init(dark: 0x5EEAD4, light: 0x0F766E, darkAlpha: 0.26, lightAlpha: 0.22),
+                textPrimary: .init(dark: 0xEFFFFB, light: 0x12312D),
+                textSecondary: .init(dark: 0xA7D3CC, light: 0x476F69),
+                textTertiary: .init(dark: 0x719A94, light: 0x6F918B),
+                accent: .init(dark: 0x5EEAD4, light: 0x08766E),
+                recording: .init(dark: 0xF472B6, light: 0xDB2777),
+                transcribing: .init(dark: 0xC084FC, light: 0x7E22CE)
+            )
+        case .solarFlare:
+            MuesliVisualPalette(
+                backgroundDeep: .init(dark: 0x120B19, light: 0xFFF3EA),
+                backgroundBase: .init(dark: 0x1B1022, light: 0xFFFBF8),
+                backgroundRaised: .init(dark: 0x26142D, light: 0xFFFFFF),
+                backgroundHover: .init(dark: 0x3A1B3C, light: 0xFFE5D3),
+                surfacePrimary: .init(dark: 0x2E1935, light: 0xFFF0E5),
+                surfaceSelected: .init(dark: 0x4B2042, light: 0xFFD6C2),
+                surfaceBorder: .init(dark: 0xFF8A4C, light: 0xC2410C, darkAlpha: 0.29, lightAlpha: 0.23),
+                textPrimary: .init(dark: 0xFFF7EE, light: 0x3B1B25),
+                textSecondary: .init(dark: 0xD9B8CB, light: 0x714C57),
+                textTertiary: .init(dark: 0xA78396, light: 0x956E79),
+                accent: .init(dark: 0xFF9A4D, light: 0xC84A0B),
+                recording: .init(dark: 0xFF4F82, light: 0xE11D48),
+                transcribing: .init(dark: 0xFF6EE7, light: 0xC026D3)
+            )
+        }
     }
 }
 
 enum MuesliTheme {
     static private(set) var visualTheme: MuesliVisualTheme = .classic
-    static var usesCuteStyling: Bool { visualTheme == .strawberryMilk }
+    private static var palette: MuesliVisualPalette { visualTheme.palette }
+    static var usesCuteStyling: Bool { visualTheme.usesCuteStyling }
 
     static func apply(visualTheme rawValue: String?) {
         visualTheme = MuesliVisualTheme.resolved(rawValue)
@@ -109,81 +381,25 @@ enum MuesliTheme {
 
     static let backgroundDeepDarkHex = 0x0B0C0E
     static let backgroundDeepLightHex = 0xF5F5F7
-    static var backgroundDeep: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0x21151D, light: 0xF9DFE9)
-            : Color.adaptive(dark: backgroundDeepDarkHex, light: backgroundDeepLightHex)
-    }
+    static var backgroundDeep: Color { palette.backgroundDeep.color }
 
     /// AppKit counterpart of `backgroundDeep`, for window chrome that cannot use SwiftUI colors.
-    static var backgroundDeepNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0x21151D, light: 0xF9DFE9)
-            : NSColor.adaptive(dark: backgroundDeepDarkHex, light: backgroundDeepLightHex)
-    }
-    static var backgroundBase: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0x2A1923, light: 0xFFF7FA)
-            : Color.adaptive(dark: 0x161719, light: 0xFFFFFF)
-    }
-    static var backgroundRaised: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0x36222D, light: 0xFFFDFE)
-            : Color.adaptive(dark: 0x1C1D20, light: 0xF0F0F2)
-    }
-    static var backgroundHover: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0x4A2C3B, light: 0xF8D9E6)
-            : Color.adaptive(dark: 0x232528, light: 0xE8E8EC)
-    }
+    static var backgroundDeepNSColor: NSColor { palette.backgroundDeep.nsColor }
+    static var backgroundBase: Color { palette.backgroundBase.color }
+    static var backgroundRaised: Color { palette.backgroundRaised.color }
+    static var backgroundHover: Color { palette.backgroundHover.color }
 
     // MARK: - Surfaces (interactive elements)
 
-    static var surfacePrimary: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0x3B2632, light: 0xFFF0F5)
-            : Color.adaptive(dark: 0x262830, light: 0xE5E5EA)
-    }
-    static var surfaceSelected: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0x553044, light: 0xFFD9E8)
-            : Color.adaptive(dark: 0x2E3340, light: 0xD6DFFE)
-    }
-    static var surfaceBorder: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0xFFB3CE, light: 0xB44B72).opacity(0.25)
-            : Color.adaptiveAlpha(
-                dark: .white, darkAlpha: 0.07,
-                light: .black, lightAlpha: 0.08
-            )
-    }
+    static var surfacePrimary: Color { palette.surfacePrimary.color }
+    static var surfaceSelected: Color { palette.surfaceSelected.color }
+    static var surfaceBorder: Color { palette.surfaceBorder.color }
 
     // MARK: - Text hierarchy
 
-    static var textPrimary: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0xFFF1F6, light: 0x4A2434)
-            : Color.adaptiveAlpha(
-                dark: .white, darkAlpha: 0.92,
-                light: .black, lightAlpha: 0.88
-            )
-    }
-    static var textSecondary: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0xD8B6C5, light: 0x765465)
-            : Color.adaptiveAlpha(
-                dark: .white, darkAlpha: 0.62,
-                light: .black, lightAlpha: 0.55
-            )
-    }
-    static var textTertiary: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0xAA8295, light: 0xA07E8E)
-            : Color.adaptiveAlpha(
-                dark: .white, darkAlpha: 0.40,
-                light: .black, lightAlpha: 0.33
-            )
-    }
+    static var textPrimary: Color { palette.textPrimary.color }
+    static var textSecondary: Color { palette.textSecondary.color }
+    static var textTertiary: Color { palette.textTertiary.color }
 
     // MARK: - Accent
 
@@ -192,17 +408,13 @@ enum MuesliTheme {
     static let pinkAccentPresetHex = "ec4899"
     static var strawberryPinkAccent: Color { Color.adaptive(dark: 0xFF8CB8, light: 0xE94F8A) }
     static var strawberryPinkAccentNSColor: NSColor { NSColor.adaptive(dark: 0xFF8CB8, light: 0xE94F8A) }
-    static var defaultAccent: Color {
-        usesCuteStyling
-            ? strawberryPinkAccent
-            : Color.adaptive(dark: defaultAccentDarkHex, light: defaultAccentLightHex)
-    }
+    static var defaultAccent: Color { palette.accent.color }
     static var accentOverrideHex: String?
     static var accent: Color {
         if let hex = accentOverrideHex, !hex.isEmpty,
            let val = UInt64(hex.replacingOccurrences(of: "#", with: ""), radix: 16) {
-            if usesCuteStyling, hex.lowercased() == pinkAccentPresetHex {
-                return strawberryPinkAccent
+            if hex.lowercased() == visualTheme.preferredAccentHex {
+                return defaultAccent
             }
             return Color(hex: Int(val))
         }
@@ -211,43 +423,31 @@ enum MuesliTheme {
     static var accentNSColor: NSColor {
         if let hex = accentOverrideHex, !hex.isEmpty,
            let val = UInt64(hex.replacingOccurrences(of: "#", with: ""), radix: 16) {
-            if usesCuteStyling, hex.lowercased() == pinkAccentPresetHex {
-                return strawberryPinkAccentNSColor
+            if hex.lowercased() == visualTheme.preferredAccentHex {
+                return palette.accent.nsColor
             }
             return NSColor(hex: Int(val))
         }
-        return usesCuteStyling
-            ? strawberryPinkAccentNSColor
-            : NSColor.adaptive(dark: defaultAccentDarkHex, light: defaultAccentLightHex)
+        return palette.accent.nsColor
     }
     static var accentSubtle: Color { accent.opacity(0.15) }
 
     // MARK: - Semantic
 
-    static var recording: Color { usesCuteStyling ? strawberryPinkAccent : Color(hex: 0xEF4444) }
-    static var transcribing: Color {
-        usesCuteStyling ? Color.adaptive(dark: 0xD7A0FF, light: 0xA75AC7) : Color(hex: 0xF59E0B)
-    }
-    static var success: Color {
-        usesCuteStyling ? Color.adaptive(dark: 0x72D8BF, light: 0x2E9F87) : Color(hex: 0x34D399)
-    }
-    static var destructive: Color {
-        usesCuteStyling ? Color.adaptive(dark: 0xFF8B96, light: 0xC7354B) : Color.red
-    }
-    static var streak: Color {
-        usesCuteStyling ? Color.adaptive(dark: 0xFFBE8E, light: 0xE87565) : Color.orange
-    }
+    static var recording: Color { palette.recording.color }
+    static var transcribing: Color { palette.transcribing.color }
+    static var success: Color { palette.success.color }
+    static var destructive: Color { palette.destructive.color }
+    static var streak: Color { palette.streak.color }
 
     // MARK: - Navigation
 
     static var navigationBase: Color {
-        usesCuteStyling
-            ? Color.adaptive(dark: 0x4B2D3C, light: 0xFFF7FB).opacity(0.74)
-            : Color.clear
+        visualTheme == .classic ? Color.clear : palette.surfacePrimary.color.opacity(0.74)
     }
-    static var navigationTint: Color { usesCuteStyling ? strawberryPinkAccent.opacity(0.18) : Color.clear }
-    static var navigationBorder: Color { usesCuteStyling ? strawberryPinkAccent.opacity(0.25) : Color.clear }
-    static var navigationShadow: Color { usesCuteStyling ? strawberryPinkAccent.opacity(0.18) : Color.clear }
+    static var navigationTint: Color { visualTheme == .classic ? Color.clear : accent.opacity(usesCuteStyling ? 0.18 : 0.12) }
+    static var navigationBorder: Color { visualTheme == .classic ? Color.clear : accent.opacity(usesCuteStyling ? 0.25 : 0.20) }
+    static var navigationShadow: Color { visualTheme == .classic ? Color.clear : accent.opacity(usesCuteStyling ? 0.18 : 0.14) }
 
     // MARK: - Typography (SF Pro / SF Rounded via .system())
 
@@ -287,8 +487,8 @@ enum MuesliTheme {
 
     static func indicatorTintNSColor(recordingColorHex: String) -> NSColor {
         let normalized = recordingColorHex.replacingOccurrences(of: "#", with: "").lowercased()
-        if usesCuteStyling, normalized == pinkAccentPresetHex {
-            return strawberryPinkAccentNSColor
+        if normalized == visualTheme.preferredAccentHex {
+            return palette.accent.nsColor
         }
         if let value = UInt64(normalized, radix: 16) {
             return NSColor(hex: Int(value))
@@ -297,29 +497,23 @@ enum MuesliTheme {
     }
 
     static var indicatorBaseNSColor: NSColor {
-        usesCuteStyling ? NSColor.adaptive(dark: 0x36222D, light: 0xFFFDFE) : NSColor(hex: 0x1E1E2E)
+        visualTheme == .classic ? NSColor(hex: 0x1E1E2E) : palette.backgroundRaised.nsColor
     }
     static var indicatorBorderNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0xFFB3CE, light: 0xB44B72).withAlphaComponent(0.25)
-            : NSColor.white.withAlphaComponent(0.16)
+        visualTheme == .classic ? NSColor.white.withAlphaComponent(0.16) : palette.surfaceBorder.nsColor
     }
     static var warningNSColor: NSColor {
-        usesCuteStyling ? NSColor.adaptive(dark: 0xFFBE8E, light: 0xE87565) : NSColor(hex: 0xD99A11)
+        visualTheme == .classic ? NSColor(hex: 0xD99A11) : palette.streak.nsColor
     }
-    static var transcribingNSColor: NSColor {
-        usesCuteStyling ? NSColor.adaptive(dark: 0xD7A0FF, light: 0xA75AC7) : NSColor(hex: 0xF59E0B)
-    }
+    static var transcribingNSColor: NSColor { palette.transcribing.nsColor }
     static var selectedSurfaceNSColor: NSColor {
-        usesCuteStyling ? NSColor.adaptive(dark: 0x553044, light: 0xFFD9E8) : NSColor(hex: 0x2E3340)
+        visualTheme == .classic ? NSColor(hex: 0x2E3340) : palette.surfaceSelected.nsColor
     }
     static var hoverSurfaceNSColor: NSColor {
-        usesCuteStyling ? NSColor.adaptive(dark: 0x4A2C3B, light: 0xF8D9E6) : NSColor(hex: 0x232528)
+        visualTheme == .classic ? NSColor(hex: 0x232528) : palette.backgroundHover.nsColor
     }
     static var textPrimaryNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0xFFF1F6, light: 0x4A2434)
-            : NSColor.white.withAlphaComponent(0.88)
+        visualTheme == .classic ? NSColor.white.withAlphaComponent(0.88) : palette.textPrimary.nsColor
     }
 
     static func appKitFont(size: CGFloat, weight: NSFont.Weight) -> NSFont {
@@ -335,63 +529,53 @@ enum MuesliTheme {
     // MARK: - AppKit panels
 
     /// AppKit notification/prompt tokens preserve the original dark Classic
-    /// panel while allowing non-SwiftUI menu-bar surfaces to follow Strawberry Milk.
+    /// panel while allowing non-SwiftUI menu-bar surfaces to follow the selected palette.
     static var panelBackgroundNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0x36222D, light: 0xFFFDFE).withAlphaComponent(0.97)
-            : NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 0.97)
+        visualTheme == .classic
+            ? NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 0.97)
+            : palette.backgroundRaised.nsColor.withAlphaComponent(0.97)
     }
     static var panelBorderNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0xFFB3CE, light: 0xB44B72).withAlphaComponent(0.25)
-            : NSColor.white.withAlphaComponent(0.10)
+        visualTheme == .classic ? NSColor.white.withAlphaComponent(0.10) : palette.surfaceBorder.nsColor
     }
     static var panelProgressNSColor: NSColor {
-        usesCuteStyling
-            ? strawberryPinkAccentNSColor.withAlphaComponent(0.8)
-            : NSColor(red: 0.30, green: 0.60, blue: 1.0, alpha: 0.8)
+        visualTheme == .classic
+            ? NSColor(red: 0.30, green: 0.60, blue: 1.0, alpha: 0.8)
+            : palette.accent.nsColor.withAlphaComponent(0.8)
     }
     static var panelPrimaryActionNSColor: NSColor {
-        usesCuteStyling ? strawberryPinkAccentNSColor : NSColor(red: 0.20, green: 0.50, blue: 1.0, alpha: 1.0)
+        visualTheme == .classic
+            ? NSColor(red: 0.20, green: 0.50, blue: 1.0, alpha: 1.0)
+            : palette.accent.nsColor
     }
     static var panelPrimaryTextNSColor: NSColor {
-        usesCuteStyling ? textPrimaryNSColor : .white
+        visualTheme == .classic ? .white : textPrimaryNSColor
     }
     static var panelSecondaryTextNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0xD8B6C5, light: 0x765465)
-            : NSColor.white.withAlphaComponent(0.55)
+        visualTheme == .classic ? NSColor.white.withAlphaComponent(0.55) : palette.textSecondary.nsColor
     }
     static var panelDetailTextNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0xD8B6C5, light: 0x765465)
-            : NSColor.white.withAlphaComponent(0.72)
+        visualTheme == .classic ? NSColor.white.withAlphaComponent(0.72) : palette.textSecondary.nsColor
     }
     static var panelDismissBackgroundNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0x21151D, light: 0xF9DFE9).withAlphaComponent(0.92)
-            : NSColor.black.withAlphaComponent(0.70)
+        visualTheme == .classic
+            ? NSColor.black.withAlphaComponent(0.70)
+            : palette.backgroundDeep.nsColor.withAlphaComponent(0.92)
     }
     static var panelDismissBorderNSColor: NSColor {
-        usesCuteStyling ? strawberryPinkAccentNSColor.withAlphaComponent(0.36) : NSColor.white.withAlphaComponent(0.55)
+        visualTheme == .classic
+            ? NSColor.white.withAlphaComponent(0.55)
+            : palette.accent.nsColor.withAlphaComponent(0.36)
     }
     static var panelDismissTintNSColor: NSColor {
-        usesCuteStyling ? textPrimaryNSColor.withAlphaComponent(0.86) : NSColor.white.withAlphaComponent(0.86)
+        visualTheme == .classic
+            ? NSColor.white.withAlphaComponent(0.86)
+            : textPrimaryNSColor.withAlphaComponent(0.86)
     }
-    static var joinActionNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0x72D8BF, light: 0x2E9F87)
-            : NSColor(red: 0.20, green: 0.72, blue: 0.53, alpha: 1.0)
-    }
-    static var joinActionSecondaryNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0x58AD99, light: 0x267F6D)
-            : NSColor(red: 0.15, green: 0.58, blue: 0.42, alpha: 1.0)
-    }
+    static var joinActionNSColor: NSColor { palette.joinAction.nsColor }
+    static var joinActionSecondaryNSColor: NSColor { palette.joinActionSecondary.nsColor }
     static var panelSecondaryButtonNSColor: NSColor {
-        usesCuteStyling
-            ? NSColor.adaptive(dark: 0x4A2C3B, light: 0xF8D9E6)
-            : NSColor.white.withAlphaComponent(0.12)
+        visualTheme == .classic ? NSColor.white.withAlphaComponent(0.12) : palette.backgroundHover.nsColor
     }
 }
 
@@ -409,7 +593,8 @@ struct MimoApplicationIconView: View {
 
     var body: some View {
         Group {
-            if let runtime = try? RuntimePaths.resolve(),
+            if theme.usesPackagedIconPreview,
+               let runtime = try? RuntimePaths.resolve(),
                let image = MuesliTheme.applicationIconImage(for: theme, runtime: runtime) {
                 Image(nsImage: image)
                     .resizable()

@@ -27,6 +27,7 @@ struct ModelsView: View {
     let appState: AppState
     let controller: MuesliController
 
+    @State private var modelHardware: LocalModelHardwareSnapshot?
     @State private var nemotron35UpdateAvailable = false
     @State private var downloadingModels: Set<String> = []
     @State private var downloadProgress: [String: Double] = [:]
@@ -77,6 +78,8 @@ struct ModelsView: View {
                         .font(MuesliTheme.body())
                         .foregroundStyle(MuesliTheme.textSecondary)
 
+                    thisMacHardwareSummary
+
                     Picker("Model category", selection: modelsCategorySelection) {
                         ForEach(ModelsCategory.allCases) { category in
                             Text(category.title).tag(category)
@@ -107,6 +110,7 @@ struct ModelsView: View {
         }
         .background(MuesliTheme.backgroundBase)
         .onAppear {
+            modelHardware = LocalModelHardwareSnapshot.current()
             checkDownloadedModels()
             checkDownloadedPostProcModels()
             isLiveCaptionModelDownloaded = MeetingLiveCaptionModelStore.isDownloaded()
@@ -173,6 +177,64 @@ struct ModelsView: View {
         )
     }
 
+    @ViewBuilder
+    private var thisMacHardwareSummary: some View {
+        if let hardware = modelHardware {
+            let recommendations = LocalModelHardware.recommendations(
+                on: hardware,
+                downloadedModelIDs: downloadedModels.union(downloadedPostProcModels)
+            )
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+                Text("This Mac · \(hardware.chipName)")
+                    .font(MuesliTheme.captionMedium())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                Text("\(Int((Double(hardware.physicalMemoryBytes) / 1_073_741_824).rounded())) GB total RAM · " + (hardware.availableDiskBytes.map { "\(LocalModelRequirementsView.diskSize($0)) free disk" } ?? "Free disk space unavailable"))
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                Text("Download size is storage, not the RAM needed to run a model. Open Mac requirements to check its fit for this computer.")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if !recommendations.isEmpty {
+                    Divider().padding(.vertical, MuesliTheme.spacing8)
+                    Text("Suggested choices for this Mac")
+                        .font(MuesliTheme.captionMedium())
+                        .foregroundStyle(MuesliTheme.textPrimary)
+                    ForEach(recommendations, id: \.modelID) { recommendation in
+                        Text("\(recommendation.purpose): \(recommendation.modelLabel)")
+                            .font(MuesliTheme.caption())
+                            .foregroundStyle(MuesliTheme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(MuesliTheme.spacing12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MuesliTheme.backgroundRaised)
+            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+        }
+    }
+
+    private var currentNonCuratedModels: [BackendOption] {
+        [appState.selectedBackend, appState.selectedMeetingTranscriptionBackend]
+            .reduce(into: []) { result, option in
+                if !option.isCurated, !result.contains(option) { result.append(option) }
+            }
+    }
+
+    private var previouslyDownloadedModels: [BackendOption] {
+        BackendOption.all.filter {
+            !$0.isCurated && downloadedModels.contains($0.model) && !currentNonCuratedModels.contains($0)
+        }
+    }
+
+    private var previouslyDownloadedCleanupModels: [Gemma4LiteRTModel] {
+        Gemma4LiteRTModel.allCases.filter {
+            downloadedModels.contains($0.repoID)
+                && !(appState.selectedPostProcessorBackend == .gemma4LiteRT && appState.config.postProcessorGemmaModel == $0.repoID)
+        }
+    }
+
     private var postProcessorDeleteMessage: String {
         guard let option = postProcModelToDelete, !option.isDownloadable else {
             return "The downloaded model files will be removed from this Mac. You can download the model again later."
@@ -184,40 +246,33 @@ struct ModelsView: View {
     private var selectedCategoryContent: some View {
         switch appState.selectedModelsCategory {
         case .dictation:
-            ForEach(BackendOption.systemManaged, id: \.model) { option in
-                let featureTourTarget: FeatureTourTarget? = option.backend == BackendOption.appleSpeechAnalyzer.backend
-                    ? .appleSpeechCard
-                    : nil
+            Text("Dictation and meetings have separate choices. In Settings → Meetings, reviewed meetings use SenseVoice for live text and your selected Whisper Large model after Stop.")
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            ForEach(BackendOption.discovery, id: \.model) { option in
+                let featureTourTarget: FeatureTourTarget? = option.isSystemManaged ? .appleSpeechCard : nil
                 modelCard(
                     option: option,
                     logo: logoForBackend(option),
-                    downloadedLabel: "Available"
+                    downloadedLabel: option.isSystemManaged ? "Available" : "Downloaded"
                 )
                 .id(featureTourTarget?.rawValue ?? option.model)
                 .featureTourTarget(featureTourTarget)
             }
 
-            familyCard(
-                title: "Parakeet Family",
-                subtitle: "The most responsive choices for everyday dictation, with multilingual and English-only options.",
-                defaultBadge: "Recommended: Unified",
-                logo: "nvidia-logo",
-                selection: $selectedParakeetModel,
-                options: BackendOption.parakeetFamily
-            )
-
-            familyCard(
-                title: "Whisper",
-                subtitle: "Dependable alternatives when you prefer Whisper's transcription style or need broader multilingual coverage.",
-                defaultBadge: "Default: Small",
-                logo: "openai-logo",
-                selection: $selectedWhisperModel,
-                options: BackendOption.whisperFamily
-            )
-
-            modelCard(option: .cohereTranscribe, logo: "cohere-logo")
-            experimentalSection
-            comingSoonSection
+            ForEach(currentNonCuratedModels, id: \.model) { option in
+                Text("Your current model · outside the recommended list")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                modelCard(
+                    option: option,
+                    logo: logoForBackend(option),
+                    isActive: true,
+                    activeLabel: appState.selectedBackend == option ? "Dictation active" : "Meeting active"
+                )
+            }
+            if !previouslyDownloadedModels.isEmpty { experimentalSection }
         case .streaming:
             streamingSection
         case .postProcessing:
@@ -274,14 +329,37 @@ struct ModelsView: View {
         }
     }
 
+    private var meetingLanguageSelectionIsLocked: Bool {
+        appState.isMeetingRecording || appState.isMeetingStarting
+    }
+
+    private var meetingLanguageSelectionHelp: String {
+        "Choose languages before recording; this meeting keeps its starting language."
+    }
+
+    private func meetingCaptionActivationDisabledReason(for backend: MeetingLiveCaptionBackend) -> String? {
+        if appState.config.meetingFinalPassEnabled {
+            return "Reviewed meetings use SenseVoice Small for live text. Turn off Review recording after meeting in Settings → Meetings to choose another preview."
+        }
+        if appState.isMeetingRecording || appState.isMeetingStarting {
+            return "Choose live captions before recording. This meeting keeps the model it started with."
+        }
+        if backend == .parakeetRealtimeEOU, appState.config.meetingChineseEnglishBilingual {
+            return "English only. Turn off Chinese + English meetings before choosing this caption model."
+        }
+        return nil
+    }
+
     private var streamingSection: some View {
         VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
             VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
-                Text("LIVE MEETINGS")
+                Text("LIVE CAPTIONS")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(MuesliTheme.textTertiary)
 
-                Text("Choose how words appear while a meeting is in progress. Nemotron also creates the saved transcript; Parakeet prioritizes a faster English preview.")
+                Text(appState.config.meetingFinalPassEnabled
+                     ? "Reviewed meetings use SenseVoice Small for live Chinese + English text, then your selected Whisper Large model after Stop. Other preview models are inactive in this workflow. Choose the final model in Settings → Meetings."
+                     : "SenseVoice Small gives Chinese + English meeting text in about 3-second chunks, even without an extra preview model. Nemotron adds faster provisional multilingual drafts; Parakeet Realtime is English only. The meeting transcript keeps what was spoken, and summaries are in English.")
                     .font(MuesliTheme.caption())
                     .foregroundStyle(MuesliTheme.textSecondary)
             }
@@ -295,14 +373,19 @@ struct ModelsView: View {
                     modelCard(
                         option: option,
                         logo: logoForBackend(option),
-                        isActive: appState.config.enableLiveStreamingPartials
+                        isActive: !appState.config.meetingFinalPassEnabled
+                            && appState.config.enableLiveStreamingPartials
                             && appState.config.resolvedMeetingLiveCaptionBackend == liveCaptionBackend,
                         onSetActive: {
+                            guard meetingCaptionActivationDisabledReason(for: liveCaptionBackend) == nil else { return }
                             controller.updateConfig {
                                 $0.meetingLiveCaptionBackend = liveCaptionBackend.rawValue
                                 $0.enableLiveStreamingPartials = true
                             }
-                        }
+                        },
+                        activeLabel: "Live text active",
+                        actionTitle: "Use for live text",
+                        activationDisabledReason: meetingCaptionActivationDisabledReason(for: liveCaptionBackend)
                     )
                 }
             }
@@ -313,8 +396,10 @@ struct ModelsView: View {
 
     private var liveCaptionModelCard: some View {
         let isActive = isLiveCaptionModelDownloaded
+            && !appState.config.meetingFinalPassEnabled
             && appState.config.enableLiveStreamingPartials
             && appState.config.resolvedMeetingLiveCaptionBackend == .parakeetRealtimeEOU
+        let activationDisabledReason = meetingCaptionActivationDisabledReason(for: .parakeetRealtimeEOU)
 
         return VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
             HStack(alignment: .top, spacing: MuesliTheme.spacing12) {
@@ -338,7 +423,7 @@ struct ModelsView: View {
                 Spacer()
 
                 if isActive {
-                    Text("Active")
+                    Text("English preview active")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(MuesliTheme.success)
                         .padding(.horizontal, 8)
@@ -356,11 +441,27 @@ struct ModelsView: View {
                 }
             }
 
+            ModelGuidanceRow(title: "Languages", detail: "English only")
+            ModelGuidanceRow(title: "Mixing languages", detail: "Chinese and mixed-language captions are not supported by this preview model.")
+            LocalModelRequirementsDisclosure(
+                modelID: MeetingLiveCaptionModelStore.modelID,
+                isActive: isActive,
+                isDownloaded: isLiveCaptionModelDownloaded,
+                hardware: modelHardware
+            )
+
             if isDownloadingLiveCaptionModel {
                 downloadProgressView(
                     for: MeetingLiveCaptionModelStore.modelID,
                     fallbackProgress: liveCaptionDownloadProgress
                 )
+            }
+
+            if let activationDisabledReason, isLiveCaptionModelDownloaded, !isActive {
+                Text(activationDisabledReason)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: MuesliTheme.spacing8) {
@@ -402,15 +503,18 @@ struct ModelsView: View {
                     .foregroundStyle(MuesliTheme.textSecondary)
                 } else if isLiveCaptionModelDownloaded {
                     if !isActive {
-                        Button("Set Active") {
+                        Button("Use English live preview") {
+                            guard meetingCaptionActivationDisabledReason(for: .parakeetRealtimeEOU) == nil else { return }
                             controller.updateConfig {
                                 $0.meetingLiveCaptionBackend = MeetingLiveCaptionBackend.parakeetRealtimeEOU.rawValue
                                 $0.enableLiveStreamingPartials = true
                             }
                         }
+                        .disabled(activationDisabledReason != nil)
+                        .help(activationDisabledReason ?? "Use English live captions for the next meeting.")
                         .buttonStyle(.plain)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(MuesliTheme.accent)
+                        .foregroundStyle(activationDisabledReason == nil ? MuesliTheme.accent : MuesliTheme.textTertiary)
                         .padding(.horizontal, MuesliTheme.spacing12)
                         .padding(.vertical, 4)
                         .background(MuesliTheme.accentSubtle)
@@ -517,12 +621,12 @@ struct ModelsView: View {
                                 .font(.system(size: 9, weight: .semibold))
                                 .foregroundStyle(MuesliTheme.textTertiary)
 
-                            Text("Experimental")
+                            Text("Previously downloaded")
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundStyle(MuesliTheme.textSecondary)
                         }
 
-                        Text("Early models for specific languages and evaluation. Expect less consistent transcripts, and try them with your own voice before relying on them.")
+                        Text("Models outside the recommended list remain available here if you already downloaded them. Removing one is always your choice.")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundStyle(MuesliTheme.textPrimary)
                             .opacity(0.8)
@@ -530,7 +634,7 @@ struct ModelsView: View {
 
                     Spacer()
 
-                    Text("Early access")
+                    Text("\(previouslyDownloadedModels.count)")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(MuesliTheme.textTertiary)
                         .padding(.horizontal, 8)
@@ -545,7 +649,7 @@ struct ModelsView: View {
 
             if showExperimental {
                 VStack(spacing: MuesliTheme.spacing12) {
-                    ForEach(BackendOption.experimental, id: \.model) { option in
+                    ForEach(previouslyDownloadedModels, id: \.model) { option in
                         if !appState.selectedPostProcessorBackend.isCompatible(with: option) {
                             modelCard(
                                 option: option,
@@ -573,14 +677,20 @@ struct ModelsView: View {
     private var cohereLanguageSelection: Binding<CohereTranscribeLanguage> {
         Binding(
             get: { appState.config.resolvedCohereLanguage },
-            set: { controller.selectCohereLanguage($0) }
+            set: { language in
+                guard !meetingLanguageSelectionIsLocked else { return }
+                controller.selectCohereLanguage(language)
+            }
         )
     }
 
     private var indicASRLanguageSelection: Binding<IndicASRLanguage> {
         Binding(
             get: { appState.config.resolvedIndicASRLanguage },
-            set: { controller.selectIndicASRLanguage($0) }
+            set: { language in
+                guard !meetingLanguageSelectionIsLocked else { return }
+                controller.selectIndicASRLanguage(language)
+            }
         )
     }
 
@@ -588,7 +698,11 @@ struct ModelsView: View {
         Binding(
             get: { appState.config.resolvedNemotron35Language },
             set: { language in
-                Task { await controller.setNemotron35Language(language) }
+                guard !meetingLanguageSelectionIsLocked else { return }
+                Task {
+                    guard !meetingLanguageSelectionIsLocked else { return }
+                    await controller.setNemotron35Language(language)
+                }
             }
         )
     }
@@ -596,28 +710,46 @@ struct ModelsView: View {
     private var whisperLanguageSelection: Binding<WhisperKitLanguage> {
         Binding(
             get: { appState.config.resolvedWhisperLanguage },
-            set: { controller.selectWhisperLanguage($0) }
+            set: { language in
+                guard !meetingLanguageSelectionIsLocked else { return }
+                controller.selectWhisperLanguage(language)
+            }
         )
     }
 
     private var parakeetLanguageSelection: Binding<ParakeetLanguage> {
         Binding(
             get: { appState.config.resolvedParakeetLanguage },
-            set: { controller.selectParakeetLanguage($0) }
+            set: { language in
+                guard !meetingLanguageSelectionIsLocked else { return }
+                controller.selectParakeetLanguage(language)
+            }
         )
+    }
+
+    private var parakeetLanguageOptions: [ParakeetLanguage] {
+        let supported = ParakeetLanguage.discoveryCases
+        let current = appState.config.resolvedParakeetLanguage
+        return supported.contains(current) ? supported : supported + [current]
     }
 
     private var qwen3AsrLanguageSelection: Binding<Qwen3AsrLanguage> {
         Binding(
             get: { appState.config.resolvedQwen3AsrLanguage },
-            set: { controller.selectQwen3AsrLanguage($0) }
+            set: { language in
+                guard !meetingLanguageSelectionIsLocked else { return }
+                controller.selectQwen3AsrLanguage(language)
+            }
         )
     }
 
     private var appleSpeechLanguageSelection: Binding<String> {
         Binding(
             get: { appState.config.resolvedAppleSpeechLanguage },
-            set: { controller.selectAppleSpeechLanguage($0) }
+            set: { language in
+                guard !meetingLanguageSelectionIsLocked else { return }
+                controller.selectAppleSpeechLanguage(language)
+            }
         )
     }
 
@@ -638,12 +770,30 @@ struct ModelsView: View {
             .padding(.top, MuesliTheme.spacing8)
 
             VStack(spacing: MuesliTheme.spacing12) {
-                ForEach(Gemma4LiteRTModel.allCases) { model in
+                ForEach(Gemma4LiteRTModel.allCases.filter { appState.selectedPostProcessorBackend == .gemma4LiteRT && appState.config.postProcessorGemmaModel == $0.repoID }) { model in
                     gemmaCleanupModelCard(model)
                 }
 
-                ForEach(displayedPostProcessorOptions) { option in
+                ForEach(PostProcessorOption.all) { option in
                     postProcModelCard(option)
+                }
+                if appState.activePostProcessor == .legacyV2 {
+                    Text("Your current cleanup model · older version")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                    postProcModelCard(.legacyV2)
+                }
+                if !previouslyDownloadedCleanupModels.isEmpty || (downloadedPostProcModels.contains(PostProcessorOption.legacyV2.id) && appState.activePostProcessor != .legacyV2) {
+                    DisclosureGroup("Previously downloaded") {
+                        ForEach(previouslyDownloadedCleanupModels) { model in
+                            gemmaCleanupModelCard(model)
+                        }
+                        if downloadedPostProcModels.contains(PostProcessorOption.legacyV2.id), appState.activePostProcessor != .legacyV2 {
+                            postProcModelCard(.legacyV2)
+                        }
+                    }
+                    .font(MuesliTheme.captionMedium())
+                    .tint(MuesliTheme.accent)
                 }
             }
         }
@@ -665,9 +815,9 @@ struct ModelsView: View {
                 controller.selectGemma4PostProcessor(model)
             },
             description: "An experimental local option for filler removal, formatting, and obvious transcript errors. It shares the \(model.label) download with dictation and Quill.",
-            activeLabel: "Cleanup Active",
+            activeLabel: "Cleanup active",
             downloadedLabel: isCompatible ? "Downloaded" : "Used for Dictation",
-            actionTitle: "Use for Cleanup",
+            actionTitle: "Use for cleanup",
             activationDisabledReason: isCompatible
                 ? nil
                 : "Unavailable while Gemma 4 is selected for dictation. Choose another dictation model first."
@@ -695,7 +845,7 @@ struct ModelsView: View {
                             .foregroundStyle(MuesliTheme.textTertiary)
                     }
 
-                    Text(option.description)
+                    Text(cleanupModelRole(option))
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                 }
@@ -703,7 +853,7 @@ struct ModelsView: View {
                 Spacer()
 
                 if isActive {
-                    Text("Active")
+                    Text("Cleanup active")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(MuesliTheme.success)
                         .padding(.horizontal, 8)
@@ -720,6 +870,13 @@ struct ModelsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
             }
+
+            LocalModelRequirementsDisclosure(
+                modelID: option.id,
+                isActive: isActive,
+                isDownloaded: isDownloaded,
+                hardware: modelHardware
+            )
 
             if showsDownloadStatus {
                 downloadProgressView(
@@ -743,7 +900,7 @@ struct ModelsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
                 } else if isDownloaded {
                     if !isActive {
-                        Button("Set Active") {
+                        Button("Use for cleanup") {
                             controller.selectPostProcessor(option)
                         }
                         .buttonStyle(.plain)
@@ -791,6 +948,21 @@ struct ModelsView: View {
             RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium)
                 .strokeBorder(isActive ? MuesliTheme.accent.opacity(0.5) : MuesliTheme.surfaceBorder, lineWidth: isActive ? 1.5 : 1)
         )
+    }
+
+    private func cleanupModelRole(_ option: PostProcessorOption) -> String {
+        switch option.id {
+        case PostProcessorOption.mimoTiny.id:
+            "Included lightweight cleanup for short, everyday dictation."
+        case PostProcessorOption.finetunedV3.id:
+            "Spoken corrections, filler removal, and list formatting."
+        case PostProcessorOption.s1Mini.id:
+            "Precise English-only normalization for punctuation, numbers, dates, and corrections."
+        case PostProcessorOption.qwen35_0_8b.id:
+            "Multilingual general rewriting and more flexible instructions."
+        default:
+            option.description
+        }
     }
 
     private func familyCard(
@@ -872,6 +1044,8 @@ struct ModelsView: View {
                             Text(language.label).tag(language)
                         }
                     }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220, alignment: .leading)
@@ -886,10 +1060,12 @@ struct ModelsView: View {
                         .frame(width: 64, alignment: .leading)
 
                     Picker("", selection: parakeetLanguageSelection) {
-                        ForEach(ParakeetLanguage.allCases, id: \.self) { language in
+                        ForEach(parakeetLanguageOptions, id: \.self) { language in
                             Text(language.label).tag(language)
                         }
                     }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220, alignment: .leading)
@@ -922,7 +1098,7 @@ struct ModelsView: View {
     @ViewBuilder
     private func familyStatusBadge(isActive: Bool, isDownloaded: Bool) -> some View {
         if isActive {
-            Text("Active")
+            Text("Dictation active")
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(MuesliTheme.success)
                 .padding(.horizontal, 8)
@@ -1078,7 +1254,7 @@ struct ModelsView: View {
         isActive: Bool,
         isDownloaded: Bool,
         isDownloading: Bool,
-        actionTitle: String = "Set Active",
+        actionTitle: String = "Use for dictation",
         activationDisabledReason: String? = nil,
         onSetActive: (() -> Void)? = nil
     ) -> some View {
@@ -1146,9 +1322,9 @@ struct ModelsView: View {
         isActive activeOverride: Bool? = nil,
         onSetActive: (() -> Void)? = nil,
         description: String? = nil,
-        activeLabel: String = "Active",
+        activeLabel: String = "Dictation active",
         downloadedLabel: String = "Downloaded",
-        actionTitle: String = "Set Active",
+        actionTitle: String = "Use for dictation",
         activationDisabledReason: String? = nil
     ) -> some View {
         let isActive = activeOverride ?? (appState.selectedBackend == option)
@@ -1166,7 +1342,7 @@ struct ModelsView: View {
                             .font(MuesliTheme.headline())
                             .foregroundStyle(MuesliTheme.textPrimary)
 
-                        if option.recommended {
+                        if option.isCurated {
                             Text("Recommended")
                                 .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.white)
@@ -1181,7 +1357,7 @@ struct ModelsView: View {
                             .foregroundStyle(MuesliTheme.textTertiary)
                     }
 
-                    Text(description ?? option.description)
+                    Text(description ?? option.speechGuidance.bestFor)
                         .font(MuesliTheme.caption())
                         .foregroundStyle(MuesliTheme.textSecondary)
                 }
@@ -1208,6 +1384,26 @@ struct ModelsView: View {
                 }
             }
 
+            if appState.selectedModelsCategory != .postProcessing {
+                if appState.config.meetingFinalPassEnabled,
+                   option == .senseVoiceSmall || option == appState.config.resolvedMeetingFinalBackend {
+                    Text((option == .senseVoiceSmall ? "Meeting role: live transcription" : "Meeting role: after-meeting transcription")
+                         + (isDownloaded ? "" : " · Download required"))
+                        .font(MuesliTheme.captionMedium())
+                        .foregroundStyle(isDownloaded ? MuesliTheme.success : MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                SpeechModelLanguageView(option: option)
+            }
+
+            ModelGuidanceDisclosure(
+                option: option,
+                isActive: isActive,
+                isDownloaded: isDownloaded,
+                hardware: modelHardware,
+                isCleanup: appState.selectedModelsCategory == .postProcessing
+            )
+
             if option.backend == BackendOption.cohereTranscribe.backend {
                 HStack(alignment: .center, spacing: MuesliTheme.spacing12) {
                     Text("Language")
@@ -1220,6 +1416,8 @@ struct ModelsView: View {
                             Text(language.label).tag(language)
                         }
                     }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220, alignment: .leading)
@@ -1238,6 +1436,8 @@ struct ModelsView: View {
                             Text(language.label).tag(language)
                         }
                     }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220, alignment: .leading)
@@ -1256,6 +1456,8 @@ struct ModelsView: View {
                             Text(language.label).tag(language)
                         }
                     }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220, alignment: .leading)
@@ -1274,9 +1476,38 @@ struct ModelsView: View {
                             Text(language.label).tag(language.id)
                         }
                     }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220, alignment: .leading)
+                }
+            }
+
+            if option == .parakeetMultilingual {
+                HStack(alignment: .center, spacing: MuesliTheme.spacing12) {
+                    Text("Language")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textTertiary)
+                    Picker("Parakeet language", selection: parakeetLanguageSelection) {
+                        ForEach(parakeetLanguageOptions, id: \.self) { language in
+                            Text(language.label + (ParakeetLanguage.discoveryCases.contains(language) ? "" : " (previous selection)"))
+                                .tag(language)
+                        }
+                    }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 260, alignment: .leading)
+                }
+                Text("This filters the writing script in the transcript; it does not add languages to the model.")
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textTertiary)
+                if !ParakeetLanguage.discoveryCases.contains(appState.config.resolvedParakeetLanguage) {
+                    Text("Your previous language selection is outside this model's supported languages. Choose Auto-detect or a supported language when you're ready.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
                 }
             }
 
@@ -1292,6 +1523,8 @@ struct ModelsView: View {
                             Text(language.label).tag(language)
                         }
                     }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220, alignment: .leading)
@@ -1310,6 +1543,8 @@ struct ModelsView: View {
                             Text(language.label).tag(language)
                         }
                     }
+                    .disabled(meetingLanguageSelectionIsLocked)
+                    .help(meetingLanguageSelectionHelp)
                     .labelsHidden()
                     .pickerStyle(.menu)
                     .frame(maxWidth: 220, alignment: .leading)

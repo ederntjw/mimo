@@ -18,17 +18,17 @@ APP_SUPPORT_DIR_NAME="${MUESLI_SUPPORT_DIR_NAME:-$APP_DISPLAY_NAME}"
 BUNDLE_ID="${MUESLI_BUNDLE_ID:-com.muesli.app}"
 TELEMETRYDECK_APP_ID="${MUESLI_TELEMETRYDECK_APP_ID:-}"
 TELEMETRY_CHANNEL="${MUESLI_TELEMETRY_CHANNEL:-unconfigured}"
-DEFAULT_APP_VERSION="0.8.6"
+DEFAULT_APP_VERSION="0.8.7"
 APP_VERSION="${MUESLI_BUILD_VERSION:-$DEFAULT_APP_VERSION}"
 APP_BUNDLE_VERSION="${MUESLI_BUNDLE_VERSION:-$APP_VERSION}"
 APP_SHORT_VERSION="${MUESLI_SHORT_VERSION:-$APP_VERSION}"
-SPARKLE_FEED_URL="${MUESLI_SPARKLE_FEED_URL-https://muesli-hq.github.io/muesli/appcast.xml}"
-SPARKLE_EDKEY="${MUESLI_SPARKLE_EDKEY-ok9CQBJ3f0MJ2GXuGBubc6VyeWyb5exmqP2b9DceqH4=}"
+SPARKLE_FEED_URL="${MUESLI_SPARKLE_FEED_URL-https://github.com/ederntjw/mimo/releases/latest/download/appcast.xml}"
+SPARKLE_EDKEY="${MUESLI_SPARKLE_EDKEY-5YCc2MtI+BSleheL65Le6rsFk6Ynw+k+19/KOcc60BY=}"
 MIMO_SUPABASE_URL="${MIMO_SUPABASE_URL:-}"
 MIMO_SUPABASE_PUBLISHABLE_KEY="${MIMO_SUPABASE_PUBLISHABLE_KEY:-}"
 STAGED_APP_DIR="$DIST_DIR/$APP_BUNDLE_NAME"
 APP_DIR="$INSTALL_DIR/$APP_BUNDLE_NAME"
-DEFAULT_SIGN_IDENTITY="Developer ID Application: Pranav Hari Guruvayurappan (58W55QJ567)"
+DEFAULT_SIGN_IDENTITY="${MIMO_DEVELOPER_ID:-Developer ID Application: Edern Tan (5UK2557MH4)}"
 SIGN_IDENTITY="${MUESLI_SIGN_IDENTITY:-$DEFAULT_SIGN_IDENTITY}"
 SKIP_SIGN="${MUESLI_SKIP_SIGN:-0}"
 PROVISIONING_PROFILE="${MUESLI_PROVISIONING_PROFILE:-}"
@@ -126,6 +126,16 @@ if [[ "$USE_XCODE_BUILD" == "1" ]]; then
   echo "Generating Xcode project (xcodegen)..."
   (cd "$XCODE_PROJECT_DIR" && xcodegen generate)
 
+  # Resolve first so the deterministic header-layout fix runs before Xcode
+  # plans ProcessXCFramework outputs. NeMo and LiteRT otherwise both claim
+  # Products/<config>/include/module.modulemap. Keep the global archives and
+  # independent SwiftPM caches pristine; normalize only this DerivedData cache.
+  xcodebuild -resolvePackageDependencies \
+    -project "$XCODE_PROJECT_DIR/MuesliXcode.xcodeproj" \
+    -scheme Muesli \
+    -derivedDataPath "$XCODE_DERIVED_DATA"
+  python3 "$ROOT/scripts/normalize_xcode_xcframework_headers.py" "$XCODE_DERIVED_DATA/SourcePackages"
+
   echo "Building app target via xcodebuild ($XCODE_CONFIG)..."
   set +e
   xcodebuild build \
@@ -134,6 +144,7 @@ if [[ "$USE_XCODE_BUILD" == "1" ]]; then
     -configuration "$XCODE_CONFIG" \
     -destination 'platform=macOS' \
     -skipMacroValidation \
+    -disableAutomaticPackageResolution \
     -derivedDataPath "$XCODE_DERIVED_DATA"
   status=$?
   set -e
@@ -370,11 +381,10 @@ cp "$ROOT/assets/Qwen_logo.svg.png" "$STAGED_APP_DIR/Contents/Resources/qwen-log
 cp "$ROOT/assets/superwhisper-logo.png" "$STAGED_APP_DIR/Contents/Resources/superwhisper-logo.png"
 cp "$ROOT/assets/AI4Bharat_logo.png" "$STAGED_APP_DIR/Contents/Resources/ai4bharat-logo.png"
 cp "$ROOT/assets/google-logo.svg" "$STAGED_APP_DIR/Contents/Resources/google-logo.svg"
-cp "$ROOT/assets/x-logo.png" "$STAGED_APP_DIR/Contents/Resources/x-logo.png"
-cp "$ROOT/assets/linkedin-logo.png" "$STAGED_APP_DIR/Contents/Resources/linkedin-logo.png"
 cp "$ROOT/assets/insights-share-background.png" "$STAGED_APP_DIR/Contents/Resources/insights-share-background.png"
 cp "$ROOT/assets/muesli_app_icon.png" "$STAGED_APP_DIR/Contents/Resources/muesli_app_icon.png"
 cp "$ROOT/assets/quill-icon.svg" "$STAGED_APP_DIR/Contents/Resources/quill-icon.svg"
+cp "$ROOT/LICENSE" "$STAGED_APP_DIR/Contents/Resources/LICENSE-MIT.txt"
 cp "$ROOT/NOTICE" "$STAGED_APP_DIR/Contents/Resources/THIRD-PARTY-NOTICES.txt"
 cp "$ROOT/native/MuesliNative/Sources/MuesliCore/Qwen3ASR/LICENSE-Apache-2.0" \
   "$STAGED_APP_DIR/Contents/Resources/LICENSE-Apache-2.0.txt"

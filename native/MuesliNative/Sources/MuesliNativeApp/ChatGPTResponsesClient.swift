@@ -13,10 +13,10 @@ enum ChatGPTResponsesError: LocalizedError {
 
 /// Shared request construction for ChatGPT-authenticated Responses calls.
 ///
-/// Muesli routes its existing ChatGPT OAuth credentials to the Codex inference
+/// Mimo routes its existing ChatGPT OAuth credentials to the Codex inference
 /// lane. That direct third-party contract is compatibility-sensitive, so keep
 /// request metadata centralized and the client identity honest: these headers
-/// describe Muesli and never impersonate an official Codex client. WHAM remains
+/// describe Mimo and never impersonate an official Codex client. WHAM remains
 /// available only as an explicit, process-level emergency rollback.
 enum ChatGPTResponsesTransport {
     enum Backend: Equatable {
@@ -35,7 +35,16 @@ enum ChatGPTResponsesTransport {
 
     static let environmentKey = "MUESLI_CHATGPT_TRANSPORT"
     static let requestTimeout: TimeInterval = 120
-    static let originator = "muesli"
+    static let originator = "mimo"
+    /// Compatibility revision of the Codex catalog consumed by this adapter,
+    /// independent of Mimo's marketing version. The server compares this query
+    /// value with its model metadata's `minimal_client_version`; sending 0.8.6
+    /// returns an empty catalog despite successful text inference. Revision
+    /// 0.153.0 covers the schema and text/reasoning options we consume, including
+    /// Astra, and is pinned rather than inferred from a different installed app.
+    /// Reference: openai/codex, codex-rs/models-manager/models.json.
+    /// Request identity remains Mimo/<actual app version>, originator mimo.
+    static let catalogCompatibilityVersion = "0.153.0"
 
     static func selectedBackend(
         environment: [String: String] = ProcessInfo.processInfo.environment
@@ -66,10 +75,28 @@ enum ChatGPTResponsesTransport {
         if backend == .codex {
             request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
             request.setValue(originator, forHTTPHeaderField: "originator")
-            request.setValue("Muesli/\(appVersion)", forHTTPHeaderField: "User-Agent")
+            request.setValue("Mimo/\(appVersion)", forHTTPHeaderField: "User-Agent")
             request.setValue(sessionID.uuidString.lowercased(), forHTTPHeaderField: "session_id")
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
+    static func makeModelsRequest(
+        token: String,
+        accountId: String,
+        appVersion: String = AppIdentity.marketingVersion
+    ) -> URLRequest {
+        var components = URLComponents(string: "https://chatgpt.com/backend-api/codex/models")!
+        components.queryItems = [URLQueryItem(name: "client_version", value: catalogCompatibilityVersion)]
+        var request = URLRequest(url: components.url!)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 8
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if !accountId.isEmpty { request.setValue(accountId, forHTTPHeaderField: "ChatGPT-Account-Id") }
+        request.setValue(originator, forHTTPHeaderField: "originator")
+        request.setValue("Mimo/\(appVersion)", forHTTPHeaderField: "User-Agent")
         return request
     }
 }
@@ -80,14 +107,60 @@ enum ChatGPTResponsesClient {
         userPrompt: String,
         model: String,
         maxOutputTokens: Int? = nil,
-        logCategory: String
+        logCategory: String,
+        credentials: (() async throws -> (token: String, accountId: String))? = nil
     ) async throws -> String {
-        let (token, accountId) = try await ChatGPTAuthManager.shared.validAccessToken()
+        let (token, accountId): (String, String)
+        if let credentials {
+            (token, accountId) = try await credentials()
+        } else {
+            (token, accountId) = try await ChatGPTAuthManager.shared.validAccessToken()
+        }
+        let usesCodex = ChatGPTResponsesTransport.selectedBackend() == .codex
+        let catalog = ChatGPTModelCatalog.shared
+        // Catalog refresh failure must not prevent a known working model from
+        // running. Actual response errors still propagate, including auth/quota.
+        let available = usesCodex ? try? await catalog.models(token: token, accountID: accountId) : nil
+        try Task.checkCancellation()
+        let candidates = usesCodex
+            ? await catalog.candidates(requested: model, available: available, accountID: accountId)
+            : [model == ChatGPTModelSelection.automatic || model.isEmpty ? ChatGPTModelSelection.fastModelIDs[0] : model]
+        return try await ChatGPTModelSelection.perform(candidates: candidates) { selectedModel in
+            let effort = available?.first(where: { $0.slug == selectedModel })?.fastReasoningEffort
+                ?? (ChatGPTModelSelection.fastModelIDs.contains(selectedModel) ? "low" : nil)
+            return try await performRequest(
+                systemPrompt: systemPrompt,
+                userPrompt: userPrompt,
+                model: selectedModel,
+                reasoningEffort: effort,
+                maxOutputTokens: maxOutputTokens,
+                logCategory: logCategory,
+                token: token,
+                accountId: accountId
+            )
+        } rejected: { rejectedModel in
+            await catalog.markUnavailable(rejectedModel, accountID: accountId)
+            fputs("[\(logCategory)] ChatGPT model \(rejectedModel) unavailable; trying an account-supported alternative.\n", stderr)
+        }
+    }
+
+    private static func performRequest(
+        systemPrompt: String,
+        userPrompt: String,
+        model: String,
+        reasoningEffort: String?,
+        maxOutputTokens: Int?,
+        logCategory: String,
+        token: String,
+        accountId: String
+    ) async throws -> String {
+        fputs("[\(logCategory)] ChatGPT Responses: using \(model)\n", stderr)
         let body = requestBody(
             systemPrompt: systemPrompt,
             userPrompt: userPrompt,
             model: model,
-            maxOutputTokens: maxOutputTokens
+            maxOutputTokens: maxOutputTokens,
+            reasoningEffort: reasoningEffort
         )
 
         let request = try ChatGPTResponsesTransport.makeRequest(
@@ -129,7 +202,8 @@ enum ChatGPTResponsesClient {
         systemPrompt: String,
         userPrompt: String,
         model: String,
-        maxOutputTokens: Int? = nil
+        maxOutputTokens: Int? = nil,
+        reasoningEffort: String? = nil
     ) -> [String: Any] {
         var body: [String: Any] = [
             "model": model,
@@ -141,7 +215,7 @@ enum ChatGPTResponsesClient {
                 "content": [["type": "input_text", "text": userPrompt]],
             ] as [String: Any]],
         ]
-        if let effort = SummaryModelPreset.reasoningEffort(for: model) {
+        if let effort = reasoningEffort ?? SummaryModelPreset.reasoningEffort(for: model) {
             body["reasoning"] = ["effort": effort]
         }
         if let maxOutputTokens, maxOutputTokens > 0 {
@@ -176,6 +250,15 @@ enum ChatGPTResponsesClient {
             throw ChatGPTResponsesError.backendFailed(
                 statusCode: httpStatus,
                 message: "Malformed ChatGPT stream payload."
+            )
+        }
+        let eventType = json["type"] as? String
+        if eventType == "error" || eventType == "response.failed" || json["error"] is [String: Any] {
+            let failure = (json["response"] as? [String: Any]) ?? json
+            let data = try JSONSerialization.data(withJSONObject: failure)
+            throw ChatGPTResponsesError.backendFailed(
+                statusCode: httpStatus,
+                message: extractErrorMessage(from: data) ?? "ChatGPT could not complete this response."
             )
         }
         return json
@@ -272,11 +355,16 @@ enum ChatGPTResponsesClient {
             return nil
         }
         if let error = json["error"] as? [String: Any] {
-            if let message = error["message"] as? String, !message.isEmpty { return message }
+            if let message = error["message"] as? String, !message.isEmpty {
+                let code = error["code"] as? String
+                return code.map { "\($0): \(message)" } ?? message
+            }
             if let code = error["code"] as? String, !code.isEmpty { return code }
             return String(describing: error)
         }
-        if let message = json["message"] as? String, !message.isEmpty { return message }
+        if let message = json["message"] as? String, !message.isEmpty {
+            return (json["code"] as? String).map { "\($0): \(message)" } ?? message
+        }
         if let detail = json["detail"] as? String, !detail.isEmpty { return detail }
         return nil
     }

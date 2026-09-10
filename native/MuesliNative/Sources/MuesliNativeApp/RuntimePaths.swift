@@ -28,6 +28,9 @@ struct RuntimePaths {
             return appIcon
         case .strawberryMilk:
             return strawberryAppIcon ?? appIcon
+        case .cherryRibbon, .lavenderDream, .peachSorbet, .mintMacaron, .roseQuartz,
+             .neonGrid, .auroraGlass, .solarFlare:
+            return appIcon
         }
     }
 

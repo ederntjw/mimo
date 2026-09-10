@@ -80,7 +80,15 @@ jobs:
         run: python3 ./scripts/test_merge_appcast_item.py
 
       - name: Test Mimo update release contract
-        run: python3 ./scripts/test_mimo_update_flow.py
+        run: |
+          node --test ./scripts/test_mimo_download_page.js
+          python3 ./scripts/test_mimo_update_flow.py
+          python3 ./scripts/test_notarized_artifact.py
+          python3 ./scripts/test_publish_mimo_release.py
+          python3 ./scripts/test_build_mimo_dmg.py
+          python3 ./scripts/test_release_keychain.py
+          python3 ./scripts/test_mimo_sync_configuration.py
+          python3 ./scripts/test_local_app_signing.py
 
       - name: Test LocalVQE runtime validation
         run: ./scripts/test_localvqe_runtime_validation.sh

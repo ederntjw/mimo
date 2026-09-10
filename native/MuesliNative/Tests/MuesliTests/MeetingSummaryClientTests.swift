@@ -5,6 +5,33 @@ import MuesliCore
 
 @Suite("MeetingSummaryClient")
 struct MeetingSummaryClientTests {
+    @Test("installed summary provider handles a bilingual meeting", .enabled(if: ProcessInfo.processInfo.environment["MIMO_BILINGUAL_LIVE_SMOKE"] == "1"))
+    func bilingualInstalledProviderSmoke() async throws {
+        let configData = try Data(contentsOf: AppIdentity.supportDirectoryURL.appendingPathComponent("config.json"))
+        let config = try JSONDecoder().decode(AppConfig.self, from: configData)
+        let transcript = """
+        [00:00:01] Speaker 1: 我们今天讨论产品发布。The launch date is Friday.
+        [00:00:05] Speaker 1: 请陈伟负责测试，预算是五千美元。We need customer feedback before Thursday.
+        [00:00:11] Speaker 1: 如果测试通过，我们就按计划发布。
+        """
+        let summary = try await MeetingSummaryClient.summarize(
+            transcript: transcript,
+            meetingTitle: "产品发布讨论",
+            config: config
+        )
+        let lower = summary.lowercased()
+        #expect(lower.contains("friday"))
+        #expect(lower.contains("thursday"))
+        #expect(lower.contains("feedback"))
+        #expect(lower.replacingOccurrences(of: ",", with: "").contains("5000") || lower.contains("five thousand"))
+        #expect(!lower.contains("## raw transcript"))
+        let title = try #require(await MeetingSummaryClient.generateTitle(transcript: transcript, config: config))
+        #expect(title.range(of: "[A-Za-z]{3,}", options: .regularExpression) != nil)
+        if let outputPath = ProcessInfo.processInfo.environment["MIMO_BILINGUAL_SMOKE_OUTPUT"] {
+            try "# \(title)\n\n\(summary)\n".write(toFile: outputPath, atomically: true, encoding: .utf8)
+        }
+    }
+
     private let customTemplate = MeetingTemplateSnapshot(
         id: "custom-follow-up",
         name: "Customer Follow-Up",
@@ -52,6 +79,90 @@ struct MeetingSummaryClientTests {
         #expect(instructions.contains("## Follow-Up Summary"))
         #expect(instructions.contains("## Risks"))
         #expect(instructions.contains("Do not invent facts"))
+    }
+
+    @Test("every meeting and live template generates English from code-switched speech")
+    func meetingOutputsUseEnglishAcrossTemplates() {
+        let chineseTemplate = MeetingTemplateSnapshot(
+            id: "chinese-format",
+            name: "项目跟进",
+            kind: .custom,
+            prompt: "请用中文总结。\n\n## 决定\n\n## 待办事项"
+        )
+        let templates = ([MeetingTemplates.auto] + MeetingTemplates.builtIns).map(\.snapshot)
+            + [
+                chineseTemplate,
+                MeetingSummaryClient.liveDigestTemplate,
+                MeetingSummaryClient.liveLectureDigestTemplate,
+                MeetingSummaryClient.liveQuestionTemplate(question: "上线日期是什么时候？"),
+                MeetingSummaryClient.liveQuestionTemplate(question: "这个概念是什么意思？", sessionKind: .lecture),
+            ]
+
+        for template in templates {
+            let instructions = MeetingSummaryClient.summaryInstructions(
+                for: template,
+                existingNotes: "## 决定\n周五发布。",
+                previousMeetingNotes: "王明负责 release checklist。"
+            )
+
+            #expect(instructions.contains("Output language: English."))
+            #expect(instructions.contains("switch between languages within a sentence"))
+            #expect(instructions.contains("do not drop information when the language changes"))
+            #expect(instructions.contains("label translated quotes as translations"))
+            #expect(instructions.contains(template.prompt + "\n\nOutput language: English."))
+        }
+    }
+
+    @Test("English summary prompts preserve mixed transcript and source context verbatim")
+    func bilingualSourceContextIsPreserved() {
+        let transcript = "[00:00:12] 王明: 我们周五 ship the dashboard，预算是 $5,000。\n[00:00:18] Alex: Agreed，我来做 QA。"
+        let handwrittenNotes = "- 客户要求：保留 CSV export。"
+        let prompt = MeetingSummaryClient.summaryUserPrompt(
+            transcript: transcript,
+            meetingTitle: "产品发布讨论",
+            existingNotes: "周五发布 dashboard。",
+            manualNotes: handwrittenNotes,
+            visualContext: "截止日期 Friday 17:00",
+            previousMeetingNotes: "预算上限 $5,000。"
+        )
+
+        #expect(prompt.hasSuffix("Raw transcript:\n" + transcript))
+        #expect(prompt.contains(handwrittenNotes))
+        #expect(prompt.contains("截止日期 Friday 17:00"))
+        #expect(prompt.contains("预算上限 $5,000。"))
+        let retained = MeetingSummaryClient.notesByRetainingManualNotes(
+            generatedNotes: "## Decisions\nShip the dashboard on Friday within the $5,000 budget.",
+            manualNotes: handwrittenNotes
+        )
+        #expect(retained.contains(handwrittenNotes))
+    }
+
+    @Test("failed bilingual summaries retain the original Chinese and English transcript")
+    func bilingualFailurePreservesTranscript() {
+        let transcript = "[00:00:12] 王明: 周五 ship it。\n[00:00:18] Alex: 好的，I'll handle QA."
+        let notes = MeetingSummaryClient.summaryFailureNotes(
+            transcript: transcript,
+            meetingTitle: "Launch Planning",
+            error: MeetingSummaryError.emptyResponse(backend: "Test")
+        )
+
+        #expect(notes.contains("## Summary failed"))
+        #expect(notes.hasSuffix("## Raw Transcript\n\n" + transcript))
+    }
+
+    @Test("English titles retain Chinese and English source excerpts")
+    func bilingualTitlesUseEnglishWithoutChangingSource() {
+        let transcript = "王明: 我们周五 launch the dashboard。Alex: I'll handle QA。"
+        let prompt = MeetingSummaryClient.titlePrompt(
+            transcript: transcript,
+            manualNotes: "决定：Friday release。"
+        )
+
+        #expect(MeetingSummaryClient.titleInstructions.contains("Write the title in English"))
+        #expect(MeetingSummaryClient.titleInstructions.contains("switch between languages within a sentence"))
+        #expect(MeetingSummaryClient.titleInstructions.contains("without inventing English names"))
+        #expect(prompt.contains(transcript))
+        #expect(prompt.contains("决定：Friday release。"))
     }
 
     @Test("summary instructions mention preserving current notes when provided")

@@ -6,7 +6,6 @@ struct AboutView: View {
     let onOpenManualDiagnosticReport: () -> Void
     let onSetAutomaticDiagnosticIssuePrompts: (Bool) -> Void
 
-    private let donateURL = "https://buymeacoffee.com/phequals7"
     private let actionButtonWidth: CGFloat = 136
 
     private var version: String {
@@ -51,28 +50,6 @@ struct AboutView: View {
                 // MARK: - Support
                 sectionHeader("Support")
                 aboutCard {
-                    aboutRow("Support Development") {
-                        Button {
-                            if let url = URL(string: donateURL) { NSWorkspace.shared.open(url) }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "heart.fill")
-                                    .font(.system(size: 12))
-                                Text("Donate")
-                                    .font(.system(size: 13, weight: .semibold))
-                            }
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, MuesliTheme.spacing20)
-                            .padding(.vertical, MuesliTheme.spacing8)
-                            .frame(width: actionButtonWidth)
-                            .background(MuesliTheme.success)
-                            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    Divider().background(MuesliTheme.surfaceBorder)
-
                     aboutRow("Source Code") {
                         actionButton("GitHub", icon: "arrow.up.right.square") {
                             NSWorkspace.shared.open(AppIdentity.sourceRepositoryURL)

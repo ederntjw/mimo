@@ -2639,6 +2639,17 @@ public final class DictationStore {
     }
 
     public func appendLiveTranscriptCheckpoints(meetingID: Int64, entries: [LiveTranscriptCheckpointEntry]) throws {
+        try writeLiveTranscriptCheckpoints(meetingID: meetingID, entries: entries, replacing: false)
+    }
+
+    /// Atomically save the drained live draft, including tail chunks that finish
+    /// after the live view moved to another meeting. Empty snapshots retain any
+    /// existing recovery evidence.
+    public func replaceLiveTranscriptCheckpoints(meetingID: Int64, entries: [LiveTranscriptCheckpointEntry]) throws {
+        try writeLiveTranscriptCheckpoints(meetingID: meetingID, entries: entries, replacing: true)
+    }
+
+    private func writeLiveTranscriptCheckpoints(meetingID: Int64, entries: [LiveTranscriptCheckpointEntry], replacing: Bool) throws {
         let trimmedEntries = entries.compactMap { entry -> LiveTranscriptCheckpointEntry? in
             let text = entry.text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
@@ -2659,6 +2670,7 @@ public final class DictationStore {
         }
 
         do {
+            if replacing { try deleteLiveTranscriptCheckpoints(meetingID: meetingID, db: db) }
             let sql = """
             INSERT INTO meeting_transcript_checkpoints
             (meeting_id, timestamp_label, speaker, start_seconds, end_seconds, text)

@@ -60,6 +60,111 @@ struct Nemotron35ModelStoreTests {
 @Suite("SenseVoiceTranscriber")
 struct SenseVoiceTranscriberTests {
 
+    @Test("SenseVoice windows cover every sample and stay below the encoder limit", arguments: [
+        0, 1, 479_999, 480_000, 480_001, 108 * 16_000 + 17, 4 * 480_000 + 123,
+    ])
+    func longAudioWindowCoverage(sampleCount: Int) {
+        let samples = [Float](repeating: 1, count: sampleCount)
+        let ranges = SenseVoiceAudioTranscription.chunkRanges(samples: samples)
+        var nextStart = 0
+        for range in ranges {
+            #expect(range.lowerBound == nextStart)
+            #expect(!range.isEmpty)
+            #expect(range.count <= SenseVoiceAudioTranscription.maximumChunkSamples)
+            nextStart = range.upperBound
+        }
+        #expect(nextStart == sampleCount)
+        #expect(ranges.reduce(0) { $0 + $1.count } == sampleCount)
+        if sampleCount <= SenseVoiceAudioTranscription.maximumChunkSamples {
+            #expect(ranges.count == (sampleCount == 0 ? 0 : 1))
+        }
+    }
+
+    @Test("SenseVoice prefers a quiet boundary near the window limit without dropping silence or speech")
+    func longAudioUsesQuietBoundary() {
+        var samples = [Float](repeating: 1, count: 31 * 16_000)
+        let quiet = (28 * 16_000)..<(28 * 16_000 + 320)
+        samples.replaceSubrange(quiet, with: repeatElement(Float.zero, count: quiet.count))
+        let ranges = SenseVoiceAudioTranscription.chunkRanges(samples: samples)
+        #expect(ranges == [0..<quiet.upperBound, quiet.upperBound..<samples.count])
+    }
+
+    @Test("SenseVoice long recordings retain the tail beyond 108 seconds and legitimate repeated text")
+    func longAudioKeepsTail() async throws {
+        var samples = [Float](repeating: 1, count: 110 * 16_000 + 17)
+        samples[samples.count - 1] = 42
+        let recorder = SenseVoiceChunkTestRecorder()
+        let text = try await SenseVoiceAudioTranscription.transcribe(samples: samples) { chunk in
+            await recorder.append(chunk.count)
+            return chunk.last == 42 ? "最后确认 before Thursday" : "重复内容 repeated content"
+        }
+        #expect(await recorder.counts == [480_000, 480_000, 480_000, 320_017])
+        #expect(text == "重复内容 repeated content 重复内容 repeated content 重复内容 repeated content 最后确认 before Thursday")
+    }
+
+    @Test("SenseVoice empty audio does not invoke the model")
+    func emptyAudioSkipsInference() async throws {
+        let recorder = SenseVoiceChunkTestRecorder()
+        let text = try await SenseVoiceAudioTranscription.transcribe(samples: []) { chunk in
+            await recorder.append(chunk.count)
+            return "Unexpected transcript"
+        }
+        #expect(text.isEmpty)
+        #expect(await recorder.counts.isEmpty)
+    }
+
+    @Test("SenseVoice pads short input and final tails to the model minimum without losing source samples", arguments: [
+        1, 3_199, 480_001,
+    ])
+    func shortInferenceBuffersMeetModelLimits(sampleCount: Int) async throws {
+        let inferenceSizes = SenseVoiceChunkTestRecorder()
+        let originalSizes = SenseVoiceChunkTestRecorder()
+        let text = try await SenseVoiceAudioTranscription.transcribe(
+            samples: [Float](repeating: 1, count: sampleCount)
+        ) { chunk in
+            #expect(chunk.count >= SenseVoiceAudioTranscription.minimumChunkSamples)
+            #expect(chunk.count <= SenseVoiceAudioTranscription.maximumChunkSamples)
+            let originalCount = chunk.prefix(while: { $0 == 1 }).count
+            #expect(chunk.dropFirst(originalCount).allSatisfy { $0 == 0 })
+            await inferenceSizes.append(chunk.count)
+            await originalSizes.append(originalCount)
+            return "Retained speech"
+        }
+
+        #expect(await originalSizes.counts.reduce(0, +) == sampleCount)
+        #expect(await inferenceSizes.counts == (sampleCount > 480_000 ? [480_000, 3_200] : [3_200]))
+        #expect(text == (sampleCount > 480_000 ? "Retained speech Retained speech" : "Retained speech"))
+    }
+
+    @Test("Cancelling long SenseVoice transcription stops before the next window")
+    func longAudioCancellationStopsFollowingWindows() async {
+        let recorder = SenseVoiceChunkTestRecorder()
+        let started = SenseVoiceChunkTestLatch()
+        let allowCompletion = SenseVoiceChunkTestLatch()
+        let task = Task {
+            try await SenseVoiceAudioTranscription.transcribe(
+                samples: [Float](repeating: 1, count: 61 * 16_000)
+            ) { chunk in
+                await recorder.append(chunk.count)
+                await started.signal()
+                await allowCompletion.wait()
+                return "First window"
+            }
+        }
+        await started.wait()
+        task.cancel()
+        await allowCompletion.signal()
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled transcription should throw instead of returning a partial result")
+        } catch is CancellationError {
+            // Expected; no subsequent chunk was sent to the model.
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+        #expect(await recorder.counts == [480_000])
+    }
+
     @Test("sensevoice model uses FluidAudio CoreML repo")
     func senseVoiceModel() {
         #expect(BackendOption.senseVoiceSmall.backend == "sensevoice")
@@ -67,10 +172,10 @@ struct SenseVoiceTranscriberTests {
         #expect(BackendOption.senseVoiceSmall.model.contains("sensevoice"))
     }
 
-    @Test("sensevoice stays experimental")
-    func senseVoiceExperimental() {
-        #expect(BackendOption.experimental.contains(.senseVoiceSmall))
-        #expect(!BackendOption.onboarding.contains(.senseVoiceSmall))
+    @Test("sensevoice is a current bilingual meeting choice")
+    func senseVoiceCurated() {
+        #expect(!BackendOption.experimental.contains(.senseVoiceSmall))
+        #expect(BackendOption.onboarding.contains(.senseVoiceSmall))
     }
 
     @Test("sensevoice cache path uses FluidAudio model store")
@@ -83,7 +188,6 @@ struct SenseVoiceTranscriberTests {
     func senseVoiceDownloadMetadata() {
         #expect(SenseVoiceTranscriber.downloadedModelSizeLabel == "~240 MB")
         #expect(BackendOption.senseVoiceSmall.sizeLabel == SenseVoiceTranscriber.downloadedModelSizeLabel)
-        #expect(BackendOption.senseVoiceSmall.description.contains("50 languages"))
     }
 }
 
@@ -481,5 +585,30 @@ struct BackendCoverageTests {
             #expect(option.description.count > 20,
                     "\(option.label) description too short: \(option.description)")
         }
+    }
+}
+
+private actor SenseVoiceChunkTestRecorder {
+    private(set) var counts: [Int] = []
+
+    func append(_ count: Int) {
+        counts.append(count)
+    }
+}
+
+private actor SenseVoiceChunkTestLatch {
+    private var signaled = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        if signaled { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func signal() {
+        signaled = true
+        let pending = waiters
+        waiters.removeAll()
+        for waiter in pending { waiter.resume() }
     }
 }

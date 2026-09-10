@@ -225,6 +225,9 @@ struct SettingsView: View {
     @State private var isShowingMimoAccountDeletionConfirmation = false
     @State private var openAIDictationAPIKey: String = ""
     @State private var openAITestState: OpenAIConnectionTestState = .idle
+    @State private var accountChatGPTModels: [ChatGPTAvailableModel] = []
+    @State private var isRefreshingChatGPTModels = false
+    @State private var chatGPTModelsRefreshFailed = false
 
     private var pendingDataDestructionBinding: Binding<Bool> {
         Binding(
@@ -263,9 +266,15 @@ struct SettingsView: View {
 
     private var dictationBackendOptions: [BackendOption] {
         guard appState.dictationProvider.isHosted else {
-            return backendOptions(including: appState.selectedBackend)
+            return BackendOption.curatedOptions(
+                from: backendOptions(including: appState.selectedBackend),
+                retaining: [appState.selectedBackend]
+            )
         }
-        return downloadedBackendOptions.filter(\.supportsHostedDictationFallback)
+        return BackendOption.curatedOptions(
+            from: downloadedBackendOptions.filter(\.supportsHostedDictationFallback),
+            retaining: [appState.selectedBackend]
+        )
     }
 
     private var displayedDictationBackend: BackendOption? {
@@ -283,34 +292,48 @@ struct SettingsView: View {
     }
 
     private var meetingBackendOptions: [BackendOption] {
-        downloadedBackendOptions.filter(\.supportsMeetingTranscription)
+        BackendOption.curatedOptions(from: downloadedBackendOptions, retaining: [appState.selectedMeetingTranscriptionBackend]).filter {
+            $0.supportsMeetingTranscription
+                && (!appState.config.meetingChineseEnglishBilingual || $0.supportsChineseEnglishMeetingTranscription)
+        }
+    }
+
+    private var meetingLiveCaptionOptions: [MeetingLiveCaptionBackend] {
+        downloadedMeetingLiveCaptionBackends.filter {
+            !appState.config.meetingChineseEnglishBilingual || $0 == .nemotron35
+        }
     }
 
     private var selectedMeetingLiveCaptionLabel: String {
         let selected = appState.config.resolvedMeetingLiveCaptionBackend
         guard appState.config.enableLiveStreamingPartials,
-              downloadedMeetingLiveCaptionBackends.contains(selected) else {
-            return "Off"
+              meetingLiveCaptionOptions.contains(selected) else {
+            return MeetingLiveTextGuidance.transcriptModelLabel
         }
-        return selected.settingsLabel
+        return meetingLiveCaptionLabel(for: selected)
+    }
+
+    private func meetingLiveCaptionLabel(for backend: MeetingLiveCaptionBackend) -> String {
+        MeetingLiveTextGuidance.previewLabel(backend, chineseEnglishBilingual: appState.config.meetingChineseEnglishBilingual)
     }
 
     private var usesUnifiedMeetingTranscript: Bool {
-        appState.config.enableLiveStreamingPartials
+        !appState.config.meetingFinalPassEnabled
+            && appState.config.enableLiveStreamingPartials
+            && !appState.config.meetingChineseEnglishBilingual
             && appState.config.resolvedMeetingLiveCaptionBackend == .nemotron35
-            && downloadedMeetingLiveCaptionBackends.contains(.nemotron35)
+            && meetingLiveCaptionOptions.contains(.nemotron35)
     }
 
     private var meetingLiveTranscriptDescription: String {
         let selected = appState.config.resolvedMeetingLiveCaptionBackend
-        guard appState.config.enableLiveStreamingPartials,
-              downloadedMeetingLiveCaptionBackends.contains(selected) else {
-            return "Shows completed transcript segments only."
-        }
-        if usesUnifiedMeetingTranscript {
-            return "Creates the live and final transcript."
-        }
-        return "Adds a low-latency preview."
+        let preview = appState.config.enableLiveStreamingPartials && meetingLiveCaptionOptions.contains(selected)
+            ? selected : nil
+        return MeetingLiveTextGuidance.description(
+            transcriptModel: appState.selectedMeetingTranscriptionBackend,
+            preview: preview,
+            chineseEnglishBilingual: appState.config.meetingChineseEnglishBilingual
+        )
     }
 
     private var selectedMeetingBackendLabel: String {
@@ -347,9 +370,12 @@ struct SettingsView: View {
 
     private var quilLocalModels: [OnDeviceCleanupModel] {
         var models = downloadedPostProcOptions
-            .filter(\.supportsQuil)
+            .filter { $0.supportsQuil && (PostProcessorOption.all.contains($0) || $0.id == appState.config.quilModel) }
             .map(OnDeviceCleanupModel.gguf)
-        for model in Gemma4LiteRTModel.allCases where Gemma4LiteRTModelStore.isAvailableLocally(model: model) {
+        for model in Gemma4LiteRTModel.allCases where
+            selectedQuilBackend == .gemma4LiteRT
+                && model.repoID == appState.config.quilModel
+                && Gemma4LiteRTModelStore.isAvailableLocally(model: model) {
             models.append(.gemma4(model))
         }
         return models
@@ -372,10 +398,14 @@ struct SettingsView: View {
 
     private var onDeviceCleanupModels: [OnDeviceCleanupModel] {
         var models = downloadedPostProcOptions
-            .filter { $0.isCompatible(with: appState.selectedBackend) }
+            .filter { $0.isCompatible(with: appState.selectedBackend)
+                && (PostProcessorOption.all.contains($0) || $0 == appState.activePostProcessor) }
             .map(OnDeviceCleanupModel.gguf)
         if TranscriptCleanupBackendOption.gemma4LiteRT.isCompatible(with: appState.selectedBackend) {
-            for model in Gemma4LiteRTModel.allCases where Gemma4LiteRTModelStore.isAvailableLocally(model: model) {
+            for model in Gemma4LiteRTModel.allCases where
+                appState.selectedPostProcessorBackend == .gemma4LiteRT
+                    && model.repoID == appState.config.postProcessorGemmaModel
+                    && Gemma4LiteRTModelStore.isAvailableLocally(model: model) {
                 models.append(.gemma4(model))
             }
         }
@@ -615,7 +645,6 @@ struct SettingsView: View {
             }) {
                 IPhoneBridgeQRCodeSheet(
                     deepLinkURL: IPhoneBridgeLinks.iOSSyncDeepLinkURL,
-                    installURL: IPhoneBridgeLinks.installURL,
                     isWaitingForDevice: appState.iCloudBridgeCompanionDiscoveryState == .waiting
                 )
             }
@@ -675,10 +704,18 @@ struct SettingsView: View {
     private static let accentPresets: [(hex: String, name: String)] = [
         ("2563eb", "Blue"),
         ("ef4444", "Red"),
+        ("c81e43", "Cherry"),
+        ("c94f35", "Coral"),
         ("f59e0b", "Amber"),
+        ("c84a0b", "Orange"),
         ("10b981", "Green"),
+        ("08766e", "Teal"),
+        ("08788f", "Cyan"),
         ("8b5cf6", "Purple"),
+        ("7652b8", "Lavender"),
         ("ec4899", "Pink"),
+        ("a92f5b", "Berry"),
+        ("a83b6a", "Rose"),
         ("1e1e2e", "Dark"),
     ]
 
@@ -1168,7 +1205,7 @@ struct SettingsView: View {
             case .waiting:
                 return "Finishing device setup…"
             case .timedOut:
-                return "Couldn't find your device. Open Muesli there, then try again."
+                return "Couldn't find your device. Open the companion app there, then try again."
             case .idle:
                 return "Ready to connect. Audio stays on this Mac."
             }
@@ -1243,6 +1280,9 @@ struct SettingsView: View {
                     Text("No compatible model installed")
                         .foregroundStyle(.secondary)
                 }
+            }
+            if let displayedDictationBackend {
+                SpeechModelGuidanceView(option: displayedDictationBackend, isDownloaded: downloadedBackendOptions.contains(displayedDictationBackend))
             }
             if appState.dictationProvider.isHosted {
                 settingsDescription(
@@ -1389,6 +1429,41 @@ struct SettingsView: View {
     private var meetingTranscriptionSettingsSection: some View {
         settingsSection("Transcription") {
             settingsRow(
+                "Review recording after meeting",
+                description: "Fast SenseVoice live text, a separate full-recording transcription, then a comparison before English minutes.",
+                controlWidth: meetingControlWidth
+            ) {
+                settingsSwitch(isOn: appState.config.meetingFinalPassEnabled) { enabled in
+                    guard !appState.isMeetingRecording, !appState.isMeetingStarting else { return }
+                    controller.updateConfig { $0.meetingFinalPassEnabled = enabled }
+                }
+                .accessibilityIdentifier("meetings.finalPassEnabled")
+                .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+                .help("Choose the meeting workflow before starting a recording.")
+            }
+            Divider().background(MuesliTheme.surfaceBorder)
+            if !appState.config.meetingFinalPassEnabled {
+                settingsRow(
+                    "Chinese + English meetings",
+                    description: "Switch between Chinese and English within a sentence. Choose SenseVoice Small for fast updates or Whisper Large Turbo for more accuracy. Transcripts keep both languages; notes are in English.",
+                    controlWidth: meetingControlWidth
+                ) {
+                    settingsSwitch(isOn: appState.config.meetingChineseEnglishBilingual) { enabled in
+                        controller.updateConfig {
+                            $0.meetingChineseEnglishBilingual = enabled
+                            if enabled {
+                                $0.meetingLiveCaptionBackend = MeetingLiveCaptionBackend.nemotron35.rawValue
+                                $0.enableLiveStreamingPartials = MeetingLiveCaptionBackend.nemotron35.isDownloaded
+                            }
+                        }
+                    }
+                    .accessibilityIdentifier("meetings.chineseEnglishBilingual")
+                    .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+                    .help("Change the meeting language mode before starting a recording.")
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+            }
+            settingsRow(
                 "Microphone",
                 description: "Only affects \(AppIdentity.displayName). Changes apply immediately.",
                 controlWidth: meetingControlWidth
@@ -1416,21 +1491,25 @@ struct SettingsView: View {
                 }
             }
             Divider().background(MuesliTheme.surfaceBorder)
-            settingsRow(
-                "Live preview model",
-                description: meetingLiveTranscriptDescription,
-                controlWidth: meetingControlWidth
-            ) {
-                if !downloadedMeetingLiveCaptionBackends.isEmpty {
+            if appState.config.meetingFinalPassEnabled {
+                meetingReviewedTranscriptionSettings
+            } else {
+                settingsRow(
+                    "Live captions",
+                    description: meetingLiveTranscriptDescription,
+                    controlWidth: meetingControlWidth
+                ) {
                     settingsMenu(
                         selection: selectedMeetingLiveCaptionLabel,
-                        options: downloadedMeetingLiveCaptionBackends.map(\.settingsLabel) + ["Off"]
+                        options: [MeetingLiveTextGuidance.transcriptModelLabel]
+                            + meetingLiveCaptionOptions.map { meetingLiveCaptionLabel(for: $0) }
                     ) { label in
-                        guard label != "Off" else {
+                        guard !appState.isMeetingRecording, !appState.isMeetingStarting else { return }
+                        guard label != MeetingLiveTextGuidance.transcriptModelLabel else {
                             controller.updateConfig { $0.enableLiveStreamingPartials = false }
                             return
                         }
-                        guard let backend = downloadedMeetingLiveCaptionBackends.first(where: { $0.settingsLabel == label }) else {
+                        guard let backend = meetingLiveCaptionOptions.first(where: { meetingLiveCaptionLabel(for: $0) == label }) else {
                             return
                         }
                         controller.updateConfig {
@@ -1438,61 +1517,140 @@ struct SettingsView: View {
                             $0.enableLiveStreamingPartials = true
                         }
                     }
-                } else {
-                    Text("Download from Models")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(MuesliTheme.textTertiary)
-                        .multilineTextAlignment(.trailing)
-                        .frame(width: meetingControlWidth, alignment: .trailing)
                 }
-            }
-            .id(FeatureTourTarget.liveCaptionsSetting.rawValue)
-            .featureTourTarget(.liveCaptionsSetting)
-            Divider().background(MuesliTheme.surfaceBorder)
-            settingsRow("Final transcript", controlWidth: meetingControlWidth) {
-                if usesUnifiedMeetingTranscript {
-                    Text("\(MeetingLiveCaptionBackend.nemotron35.label) (same model)")
-                        .font(MuesliTheme.body())
-                        .foregroundStyle(MuesliTheme.textSecondary)
-                        .frame(width: meetingControlWidth, alignment: .trailing)
-                } else if meetingBackendOptions.isEmpty {
-                    Text("No downloaded models")
-                        .font(MuesliTheme.body())
-                        .foregroundStyle(MuesliTheme.textTertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    settingsMenu(
-                        selection: selectedMeetingBackendLabel,
-                        options: meetingBackendOptions.map(\.label)
-                    ) { label in
-                        if let option = meetingBackendOptions.first(where: { $0.label == label }) {
-                            controller.selectMeetingTranscriptionBackend(option)
+                .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+                .help("Choose captions before recording. Use transcript model keeps live text enabled without loading a second model.")
+                .id(FeatureTourTarget.liveCaptionsSetting.rawValue)
+                .featureTourTarget(.liveCaptionsSetting)
+                Divider().background(MuesliTheme.surfaceBorder)
+                settingsRow("Meeting transcript model", controlWidth: meetingControlWidth) {
+                    if usesUnifiedMeetingTranscript {
+                        Text("\(MeetingLiveCaptionBackend.nemotron35.label) (same model)")
+                            .font(MuesliTheme.body())
+                            .foregroundStyle(MuesliTheme.textSecondary)
+                            .frame(width: meetingControlWidth, alignment: .trailing)
+                    } else if meetingBackendOptions.isEmpty {
+                        Text("No downloaded models")
+                            .font(MuesliTheme.body())
+                            .foregroundStyle(MuesliTheme.textTertiary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        settingsMenu(
+                            selection: selectedMeetingBackendLabel,
+                            options: meetingBackendOptions.map(\.label)
+                        ) { label in
+                            if let option = meetingBackendOptions.first(where: { $0.label == label }) {
+                                controller.selectMeetingTranscriptionBackend(option)
+                            }
                         }
                     }
                 }
-            }
-            if usesUnifiedMeetingTranscript {
-                Divider().background(MuesliTheme.surfaceBorder)
-                settingsRow("Language", controlWidth: meetingControlWidth) {
-                    nemotron35LanguageMenu
+                .disabled(appState.isMeetingStarting)
+                .help("This model transcribes completed segments during the meeting and the saved recording. Wait for recording to start before changing it.")
+                SpeechModelGuidanceView(
+                    option: usesUnifiedMeetingTranscript ? .nemotron35Multilingual : appState.selectedMeetingTranscriptionBackend,
+                    isDownloaded: usesUnifiedMeetingTranscript
+                        ? meetingLiveCaptionOptions.contains(.nemotron35)
+                        : downloadedBackendOptions.contains(appState.selectedMeetingTranscriptionBackend)
+                )
+                Group {
+                    if appState.config.meetingChineseEnglishBilingual {
+                        Divider().background(MuesliTheme.surfaceBorder)
+                        settingsRow("Meeting language", controlWidth: meetingControlWidth) {
+                            Text("Automatic · Chinese + English")
+                                .font(MuesliTheme.body())
+                                .foregroundStyle(MuesliTheme.textSecondary)
+                        }
+                    } else if usesUnifiedMeetingTranscript {
+                        Divider().background(MuesliTheme.surfaceBorder)
+                        settingsRow("Language", controlWidth: meetingControlWidth) {
+                            nemotron35LanguageMenu
+                        }
+                    } else if appState.selectedMeetingTranscriptionBackend.backend == BackendOption.cohereTranscribe.backend {
+                        Divider().background(MuesliTheme.surfaceBorder)
+                        settingsRow("Cohere language", controlWidth: meetingControlWidth) {
+                            cohereLanguageMenu
+                        }
+                    } else if appState.selectedMeetingTranscriptionBackend.backend == BackendOption.indicASR.backend {
+                        Divider().background(MuesliTheme.surfaceBorder)
+                        settingsRow("Indic language", controlWidth: meetingControlWidth) {
+                            indicLanguageMenu
+                        }
+                    } else if appState.selectedMeetingTranscriptionBackend.supportsWhisperLanguageSelection {
+                        Divider().background(MuesliTheme.surfaceBorder)
+                        settingsRow("Whisper language", controlWidth: meetingControlWidth) {
+                            whisperLanguageMenu
+                        }
+                    }
                 }
-            } else if appState.selectedMeetingTranscriptionBackend.backend == BackendOption.cohereTranscribe.backend {
-                Divider().background(MuesliTheme.surfaceBorder)
-                settingsRow("Cohere language", controlWidth: meetingControlWidth) {
-                    cohereLanguageMenu
-                }
-            } else if appState.selectedMeetingTranscriptionBackend.backend == BackendOption.indicASR.backend {
-                Divider().background(MuesliTheme.surfaceBorder)
-                settingsRow("Indic language", controlWidth: meetingControlWidth) {
-                    indicLanguageMenu
-                }
-            } else if appState.selectedMeetingTranscriptionBackend.supportsWhisperLanguageSelection {
-                Divider().background(MuesliTheme.surfaceBorder)
-                settingsRow("Whisper language", controlWidth: meetingControlWidth) {
-                    whisperLanguageMenu
-                }
+                .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+                .help("Choose the language before recording. This meeting keeps the language chosen when it started.")
             }
         }
+    }
+
+    @ViewBuilder
+    private var meetingReviewedTranscriptionSettings: some View {
+        settingsRow(
+            "During the meeting",
+            description: "Fast Mandarin Chinese + English text, including language switches. Updates arrive about every 3 seconds or at pauses.",
+            controlWidth: meetingControlWidth
+        ) {
+            Text(MeetingLiveTextGuidance.reviewedLiveModelLabel)
+                .font(MuesliTheme.body())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: meetingControlWidth, alignment: .trailing)
+        }
+        .id(FeatureTourTarget.liveCaptionsSetting.rawValue)
+        .featureTourTarget(.liveCaptionsSetting)
+        Divider().background(MuesliTheme.surfaceBorder)
+        settingsRow(
+            "After-meeting transcript model",
+            description: "Transcribes the complete saved recording after Stop. Full Large v3 favors accuracy; Turbo finishes faster.",
+            controlWidth: meetingControlWidth
+        ) {
+            let options: [BackendOption] = [.whisperLargeV3, .whisperLargeTurbo]
+            settingsMenu(
+                selection: appState.config.resolvedMeetingFinalBackend.label,
+                options: options.map(\.label)
+            ) { label in
+                guard !appState.isMeetingRecording, !appState.isMeetingStarting,
+                      let option = options.first(where: { $0.label == label }) else { return }
+                controller.selectMeetingFinalTranscriptionBackend(option)
+            }
+            .accessibilityIdentifier("meetings.finalTranscriptionModel")
+        }
+        .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+        .help("Choose the final model before recording. This meeting keeps the model it starts with.")
+        SpeechModelGuidanceView(
+            option: appState.config.resolvedMeetingFinalBackend,
+            isDownloaded: downloadedBackendOptions.contains(appState.config.resolvedMeetingFinalBackend)
+        )
+        let requiredModels: [BackendOption] = [.senseVoiceSmall, appState.config.resolvedMeetingFinalBackend]
+        let missingModels = requiredModels.filter { !downloadedBackendOptions.contains($0) }
+        if !missingModels.isEmpty {
+            settingsRow(
+                "Download needed before recording",
+                description: missingModels.map(\.label).joined(separator: " and ") + ". Both meeting models must be ready before recording starts.",
+                controlWidth: meetingControlWidth
+            ) {
+                compactActionButton("View speech models", systemImage: "arrow.down.circle") {
+                    controller.showModels(category: .dictation)
+                }
+                .frame(width: meetingControlWidth, alignment: .trailing)
+            }
+        }
+        Divider().background(MuesliTheme.surfaceBorder)
+        settingsRow("Meeting language", controlWidth: meetingControlWidth) {
+            Text("Automatic · Chinese + English")
+                .font(MuesliTheme.body())
+                .foregroundStyle(MuesliTheme.textSecondary)
+        }
+        Text(MeetingLiveTextGuidance.reviewedMeetingDescription(finalModel: appState.config.resolvedMeetingFinalBackend))
+            .font(MuesliTheme.caption())
+            .foregroundStyle(MuesliTheme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var dictationCleanupSettingsSection: some View {
@@ -1552,6 +1710,14 @@ struct SettingsView: View {
                         .frame(height: 24)
                     }
                 }
+                LocalModelRequirementsView(
+                    modelID: appState.selectedPostProcessorBackend == .gemma4LiteRT
+                        ? appState.config.postProcessorGemmaModel : appState.activePostProcessor.id,
+                    isDownloaded: onDeviceCleanupModels.contains {
+                        $0.id == (appState.selectedPostProcessorBackend == .gemma4LiteRT
+                            ? appState.config.postProcessorGemmaModel : appState.activePostProcessor.id)
+                    }
+                )
                 if gemmaCleanupIsUnavailable {
                     Text("Gemma 4 is unavailable for cleanup while a Gemma 4 model is selected for dictation.")
                         .font(MuesliTheme.body())
@@ -1630,6 +1796,10 @@ struct SettingsView: View {
                         .frame(height: 24)
                     }
                 }
+                LocalModelRequirementsView(
+                    modelID: appState.config.quilModel,
+                    isDownloaded: quilLocalModels.contains { $0.id == appState.config.quilModel }
+                )
             } else {
                 hostedQuilSettings(for: selectedQuilBackend)
             }
@@ -1743,9 +1913,12 @@ struct SettingsView: View {
             selection: selectedCohereLanguage.label,
             options: CohereTranscribeLanguage.allCases.map(\.label)
         ) { label in
+            guard !appState.isMeetingRecording, !appState.isMeetingStarting else { return }
             guard let language = CohereTranscribeLanguage.allCases.first(where: { $0.label == label }) else { return }
             controller.selectCohereLanguage(language)
         }
+        .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+        .help("Dictation and meetings share this language setting. Change it after the meeting ends.")
     }
 
     private var nemotron35LanguageMenu: some View {
@@ -1753,9 +1926,12 @@ struct SettingsView: View {
             selection: selectedNemotron35Language.label,
             options: Nemotron35Language.allCases.map(\.label)
         ) { label in
+            guard !appState.isMeetingRecording, !appState.isMeetingStarting else { return }
             guard let language = Nemotron35Language.allCases.first(where: { $0.label == label }) else { return }
             Task { await controller.setNemotron35Language(language) }
         }
+        .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+        .help("The current meeting keeps the language it started with. Change it after the meeting ends.")
     }
 
     private var whisperLanguageMenu: some View {
@@ -1763,9 +1939,12 @@ struct SettingsView: View {
             selection: selectedWhisperLanguage.label,
             options: WhisperKitLanguage.allCases.map(\.label)
         ) { label in
+            guard !appState.isMeetingRecording, !appState.isMeetingStarting else { return }
             guard let language = WhisperKitLanguage.allCases.first(where: { $0.label == label }) else { return }
             controller.selectWhisperLanguage(language)
         }
+        .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+        .help("Dictation and meetings share this language setting. Change it after the meeting ends.")
     }
 
     private var indicLanguageMenu: some View {
@@ -1773,11 +1952,14 @@ struct SettingsView: View {
             selection: selectedIndicASRLanguage.label,
             options: IndicASRLanguage.allCases.map(\.label),
             onSelectIndex: { index in
+                guard !appState.isMeetingRecording, !appState.isMeetingStarting else { return }
                 guard index >= 0, index < IndicASRLanguage.allCases.count else { return }
                 controller.selectIndicASRLanguage(IndicASRLanguage.allCases[index])
             }
         )
         .frame(height: 24)
+        .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+        .help("Dictation and meetings share this language setting. Change it after the meeting ends.")
     }
 
     @ViewBuilder
@@ -1946,8 +2128,25 @@ struct SettingsView: View {
                 settingsRow("Model", controlWidth: meetingControlWidth) {
                     settingsModelMenu(
                         currentModel: appState.config.chatGPTModel,
-                        presets: SummaryModelPreset.chatGPTModels
+                        presets: accountChatGPTModels.isEmpty
+                            ? [SummaryModelPreset.chatGPTModels[0]]
+                            : SummaryModelPreset.accountChatGPTPresets(accountChatGPTModels)
                     ) { val in controller.updateConfig { $0.chatGPTModel = val } }
+                }
+                .task(id: appState.isChatGPTAuthenticated) {
+                    await refreshChatGPTModels(forceRefresh: false)
+                }
+                HStack {
+                    Text(chatGPTModelsRefreshFailed
+                         ? "The model list could not refresh. Automatic will still try an available model."
+                         : "Automatic uses a fast model available to your account.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                    Spacer()
+                    Button(isRefreshingChatGPTModels ? "Refreshing…" : "Refresh models") {
+                        Task { await refreshChatGPTModels(forceRefresh: true) }
+                    }
+                    .disabled(isRefreshingChatGPTModels || !appState.isChatGPTAuthenticated)
                 }
             } else if appState.selectedMeetingSummaryBackend == .openAI {
                 settingsRow("API Key", controlWidth: meetingControlWidth) {
@@ -2484,7 +2683,10 @@ struct SettingsView: View {
     }
 
     private var visualThemePicker: some View {
-        HStack(spacing: MuesliTheme.spacing8) {
+        LazyVGrid(
+            columns: [GridItem(.flexible()), GridItem(.flexible())],
+            spacing: MuesliTheme.spacing8
+        ) {
             ForEach(MuesliVisualTheme.allCases) { theme in
                 visualThemeChoice(theme)
             }
@@ -2512,7 +2714,7 @@ struct SettingsView: View {
                         .font(MuesliTheme.captionMedium())
                         .foregroundStyle(theme.previewTextPrimary)
                     Text(theme.detail)
-                        .font(.system(size: 10, weight: .regular, design: theme == .strawberryMilk ? .rounded : .default))
+                        .font(.system(size: 10, weight: .regular, design: theme.usesCuteStyling ? .rounded : .default))
                         .foregroundStyle(theme.previewTextSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -2539,11 +2741,14 @@ struct SettingsView: View {
         .accessibilityIdentifier("appearance.theme.\(theme.rawValue)")
         .accessibilityLabel(theme.label)
         .accessibilityValue(isSelected ? "Selected" : "Not selected")
-        .accessibilityIdentifier("appearance.theme.\(theme.rawValue)")
     }
 
     private var glassTintPicker: some View {
-        HStack(spacing: 6) {
+        LazyVGrid(
+            columns: Array(repeating: GridItem(.fixed(22), spacing: 6), count: 8),
+            alignment: .leading,
+            spacing: 6
+        ) {
             ForEach(Self.accentPresets, id: \.hex) { preset in
                 let isSelected = appState.config.recordingColorHex.lowercased() == preset.hex
                 Button {
@@ -2563,6 +2768,7 @@ struct SettingsView: View {
                 .help(preset.name)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var menuBarIconPicker: some View {
@@ -2600,6 +2806,29 @@ struct SettingsView: View {
                     .help(option.label)
                 }
             }
+        }
+    }
+
+    @MainActor
+    private func refreshChatGPTModels(forceRefresh: Bool) async {
+        guard appState.isChatGPTAuthenticated else {
+            accountChatGPTModels = []
+            chatGPTModelsRefreshFailed = false
+            return
+        }
+        isRefreshingChatGPTModels = true
+        defer { isRefreshingChatGPTModels = false }
+        do {
+            let (token, accountID) = try await ChatGPTAuthManager.shared.validAccessToken()
+            let models = try await ChatGPTModelCatalog.shared.models(
+                token: token, accountID: accountID, forceRefresh: forceRefresh
+            )
+            try Task.checkCancellation()
+            accountChatGPTModels = models
+            chatGPTModelsRefreshFailed = false
+        } catch {
+            guard !Task.isCancelled else { return }
+            chatGPTModelsRefreshFailed = true
         }
     }
 
@@ -2988,7 +3217,7 @@ struct SettingsView: View {
 
         do {
             let supportDir = appSupportBase
-                .appendingPathComponent(Bundle.main.infoDictionary?["MuesliSupportDirectoryName"] as? String ?? "Muesli")
+                .appendingPathComponent(AppIdentity.supportDirectoryName)
             let destPath = try SoundController.importCustomClip(from: url, supportDir: supportDir)
             controller.updateConfig {
                 $0.maraudersMapAudioClip = SoundController.customClipID

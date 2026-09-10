@@ -37,6 +37,8 @@ jobs:
       MIMO_NOTARY_TEAM_ID: ${{ secrets.MIMO_NOTARY_TEAM_ID }}
       DISPATCH_VERSION: ${{ inputs.version }}
       OUTPUT_DIR: dist-mimo-update
+      MIMO_PACKAGE_WORK_ROOT: ${{ runner.temp }}/mimo-package-work
+      MUESLI_DMG_CONFIGURE_FINDER: "0"
 
     steps:
       - name: Check out the tagged source
@@ -64,8 +66,6 @@ jobs:
             exit 2
           fi
           for required in \
-            MIMO_SUPABASE_URL \
-            MIMO_SUPABASE_PUBLISHABLE_KEY \
             MIMO_DEVELOPER_ID \
             MIMO_DEVELOPER_ID_CERTIFICATE_BASE64 \
             MIMO_DEVELOPER_ID_CERTIFICATE_PASSWORD \
@@ -77,6 +77,7 @@ jobs:
               exit 2
             fi
           done
+          python3 ./scripts/validate_mimo_sync_configuration.py
           if [[ ! -f "docs/release-notes/${version}.md" ]]; then
             echo "Missing docs/release-notes/${version}.md" >&2
             exit 2
@@ -88,6 +89,13 @@ jobs:
             exit 2
           fi
 
+          if git show-ref --verify --quiet "refs/tags/$tag"; then
+            if [[ "$(git rev-parse "refs/tags/$tag^{commit}")" != "$GITHUB_SHA" ]]; then
+              echo "Release tag $tag does not match the checked-out commit." >&2
+              exit 2
+            fi
+          fi
+
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
@@ -96,10 +104,16 @@ jobs:
 
       - name: Import Developer ID and configure Apple notarization
         run: |
+          umask 077
           certificate_path="$RUNNER_TEMP/mimo-developer-id.p12"
           keychain_path="$RUNNER_TEMP/mimo-signing.keychain-db"
           keychain_password="$(openssl rand -hex 32)"
           echo "::add-mask::$keychain_password"
+
+          echo "MIMO_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+          security list-keychains -d user > "$RUNNER_TEMP/mimo-original-keychains.txt"
+          security default-keychain -d user > "$RUNNER_TEMP/mimo-original-default-keychain.txt"
+          trap 'rm -f "$certificate_path"' EXIT
 
           printf '%s' "$MIMO_DEVELOPER_ID_CERTIFICATE_BASE64" | /usr/bin/base64 -D > "$certificate_path"
           security create-keychain -p "$keychain_password" "$keychain_path"
@@ -108,11 +122,15 @@ jobs:
           security import "$certificate_path" \
             -k "$keychain_path" \
             -P "$MIMO_DEVELOPER_ID_CERTIFICATE_PASSWORD" \
-            -A -t cert -f pkcs12
+            -T /usr/bin/codesign -T /usr/bin/security -t cert -f pkcs12
           security set-key-partition-list \
             -S apple-tool:,apple:,codesign: \
             -s -k "$keychain_password" "$keychain_path"
-          security list-keychains -d user -s "$keychain_path"
+          python3 - "$keychain_path" "$RUNNER_TEMP/mimo-original-keychains.txt" <<'PYTHON'
+          import pathlib, shlex, subprocess, sys
+          originals = shlex.split(pathlib.Path(sys.argv[2]).read_text())
+          subprocess.run(["security", "list-keychains", "-d", "user", "-s", sys.argv[1], *originals], check=True)
+          PYTHON
           security default-keychain -d user -s "$keychain_path"
 
           xcrun notarytool store-credentials MimoNotary \
@@ -120,13 +138,12 @@ jobs:
             --team-id "$MIMO_NOTARY_TEAM_ID" \
             --password "$MIMO_NOTARY_APP_PASSWORD"
           rm -f "$certificate_path"
-          echo "MIMO_RELEASE_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
 
       - name: Cache LocalVQE runtime
         uses: actions/cache@v4
         with:
           path: native/MuesliNative/LocalVQE/lib
-          key: mimo-localvqe-${{ runner.os }}-${{ hashFiles('scripts/build_localvqe.sh') }}
+          key: mimo-localvqe-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build_localvqe.sh') }}
 
       - name: Build the update-enabled Mimo DMG
         env:
@@ -183,24 +200,11 @@ jobs:
             --require-release-notes \
             --require-notarized
 
-      - name: Publish GitHub release and update feed
+      - name: Verify uploaded draft assets and publish the release
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-        run: |
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists; refusing to replace published assets." >&2
-            exit 1
-          fi
-
-          shasum -a 256 "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg" > "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg.sha256"
-          gh release create "$RELEASE_TAG" \
-            "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg#Mimo ${RELEASE_VERSION} DMG" \
-            "$OUTPUT_DIR/Mimo-${RELEASE_VERSION}.dmg.sha256#SHA-256 checksum" \
-            "$OUTPUT_DIR/appcast.xml#Sparkle update feed" \
-            --title "Mimo ${RELEASE_VERSION}" \
-            --notes-file "docs/release-notes/${RELEASE_VERSION}.md" \
-            --latest
+        run: ./scripts/publish_mimo_release.sh
 
       - name: Confirm the public latest feed
         env:
@@ -209,7 +213,8 @@ jobs:
           for attempt in 1 2 3 4 5; do
             if curl --fail --location --silent --show-error \
               "https://github.com/ederntjw/mimo/releases/latest/download/appcast.xml" \
-              | grep -q "<sparkle:version>${RELEASE_VERSION}</sparkle:version>"; then
+              --output "$RUNNER_TEMP/mimo-public-appcast.xml" \
+              && cmp -s "$OUTPUT_DIR/appcast.xml" "$RUNNER_TEMP/mimo-public-appcast.xml"; then
               echo "Mimo ${RELEASE_VERSION} is live on the Sparkle feed."
               exit 0
             fi
@@ -218,9 +223,169 @@ jobs:
           echo "The release exists, but the latest appcast redirect did not converge in time." >&2
           exit 1
 
+      - name: Prepare safe notarization recovery receipts
+        id: notary_receipts
+        if: failure() || cancelled()
+        run: |
+          python3 - <<'PYTHON'
+          import hashlib, json, os, pathlib, re, shutil, uuid
+
+          root = pathlib.Path(os.environ["MIMO_PACKAGE_WORK_ROOT"])
+          destination = pathlib.Path(os.environ["RUNNER_TEMP"]) / "mimo-notary-receipts"
+          recovery = pathlib.Path(os.environ["RUNNER_TEMP"]) / "mimo-notarization-recovery"
+          allowed_statuses = {"Accepted", "Invalid", "In Progress", "Rejected"}
+
+          def read_json(path):
+              try:
+                  value = json.loads(path.read_text())
+                  return value if isinstance(value, dict) else {}
+              except (OSError, ValueError):
+                  return {}
+
+          def submission_id(value):
+              try:
+                  return str(uuid.UUID(value))
+              except (ValueError, TypeError, AttributeError):
+                  return None
+
+          count = 0
+          recovery_count = 0
+          for phase in sorted(root.glob(".mimo-package.*/notarization/*")):
+              if not phase.is_dir() or phase.name not in {"app", "dmg"}:
+                  continue
+              # Receipt output never includes raw logs or signing material.
+              # Upload failures can include temporary S3 credentials/signed URLs.
+              record = {"phase": phase.name, "responses": {}, "exitCodes": {}}
+              artifact = read_json(phase / "artifact.json")
+              digest = artifact.get("sha256", "")
+              if isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest):
+                  record["sha256"] = digest
+              name = pathlib.Path(str(artifact.get("path", ""))).name
+              if re.fullmatch(r"[A-Za-z0-9._-]+", name):
+                  record["artifactName"] = name
+              for action in ["submit", "wait", "log"]:
+                  response = read_json(phase / f"{action}.json")
+                  safe = {}
+                  identifier = submission_id(response.get("id") or response.get("jobId"))
+                  if identifier:
+                      safe["id"] = identifier
+                  if isinstance(response.get("status"), str) and response["status"] in allowed_statuses:
+                      safe["status"] = response["status"]
+                  if safe:
+                      record["responses"][action] = safe
+                  try:
+                      record["exitCodes"][action] = int((phase / f"{action}.exit-code").read_text().strip())
+                  except (OSError, ValueError):
+                      pass
+              try:
+                  identifier = submission_id((phase / "submission-id.txt").read_text().strip())
+                  if identifier:
+                      record["submissionID"] = identifier
+              except OSError:
+                  pass
+              record["uploadCompleted"] = (phase / "upload-completed.txt").is_file() and record["exitCodes"].get("submit") == 0
+              try:
+                  route = (phase / "upload-route.txt").read_text().strip()
+                  if route in {"--s3-acceleration", "--no-s3-acceleration"}:
+                      record["uploadRoute"] = route
+              except OSError:
+                  pass
+              diagnostics = []
+              for path in phase.glob("*.stderr.log"):
+                  try:
+                      text = path.read_text(errors="replace")
+                  except OSError:
+                      continue
+                  for marker in ["HTTPClientError.deadlineExceeded", "abortedUpload", "Timeout reached"]:
+                      if marker in text and marker not in diagnostics:
+                          diagnostics.append(marker)
+              record["diagnosticCategories"] = diagnostics
+              destination.mkdir(parents=True, exist_ok=True)
+              count += 1
+              # These exact artifacts reached notarization only after the
+              # packager's signature gates. Preserve them separately so a
+              # pending Apple job can be recovered without signing a new build.
+              # Never glob/copy an entire staging root: it may contain secrets.
+              stage = phase.parent.parent
+              artifact_path = pathlib.Path(str(artifact.get("path", "")))
+              expected_artifact = (
+                  phase.name == "app" and artifact_path == stage / "Mimo.app.zip"
+              ) or (
+                  phase.name == "dmg" and artifact_path.parent == stage / "dmg"
+                  and re.fullmatch(r"Mimo-[0-9][0-9A-Za-z.\-]*\.dmg", artifact_path.name)
+              )
+              contained_artifact = (
+                  expected_artifact and stage.resolve().parent == root.resolve()
+                  and artifact_path.resolve() == stage.resolve() / artifact_path.relative_to(stage)
+              )
+              if contained_artifact and artifact_path.is_file() and not artifact_path.is_symlink() and "sha256" in record:
+                  artifact_destination = recovery / f"{count:02d}-{phase.name}"
+                  artifact_destination.mkdir(parents=True, exist_ok=True)
+                  copied = artifact_destination / artifact_path.name
+                  shutil.copyfile(artifact_path, copied)
+                  copied_digest = hashlib.sha256()
+                  with copied.open("rb") as source:
+                      for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                          copied_digest.update(chunk)
+                  record["recoveryArtifactSha256"] = copied_digest.hexdigest()
+                  record["recoveryArtifactName"] = copied.name
+                  (artifact_destination / "receipt.json").write_text(json.dumps(record, indent=2) + "\n")
+                  recovery_count += 1
+              (destination / f"{count:02d}-{phase.name}.json").write_text(json.dumps(record, indent=2) + "\n")
+          if recovery_count:
+              (recovery / "README.txt").write_text(
+                  "Notarization recovery only. These files are not a published release or proof of Apple acceptance.\n"
+                  "Use the recorded submission ID to check the existing job; do not blindly submit again.\n"
+                  "After acceptance, staple and verify the exact app/DMG before release publication.\n"
+                  "The recovery hash describes retained bytes; a DMG already stapled after acceptance can differ from its submitted hash.\n"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"has_receipts={'true' if count else 'false'}\n")
+              output.write(f"has_recovery_artifacts={'true' if recovery_count else 'false'}\n")
+          print(f"Prepared {count} sanitized notarization receipts; raw output and signing material excluded.")
+          print(f"Preserved {recovery_count} exact package artifacts separately for notarization recovery only.")
+          PYTHON
+
+      - name: Retain safe notarization recovery receipts
+        if: (failure() || cancelled()) && steps.notary_receipts.outputs.has_receipts == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimo-notarization-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mimo-notary-receipts
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Retain package artifacts for notarization recovery only
+        if: (failure() || cancelled()) && steps.notary_receipts.outputs.has_recovery_artifacts == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mimo-notarization-recovery-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/mimo-notarization-recovery
+          retention-days: 3
+          if-no-files-found: error
+
       - name: Remove temporary signing keychain
         if: always()
         run: |
-          if [[ -n "${MIMO_RELEASE_KEYCHAIN:-}" && -f "$MIMO_RELEASE_KEYCHAIN" ]]; then
-            security delete-keychain "$MIMO_RELEASE_KEYCHAIN" || true
-          fi
+          rm -f "$RUNNER_TEMP/mimo-developer-id.p12"
+          python3 - "$RUNNER_TEMP" <<'PYTHON'
+          import os, pathlib, shlex, subprocess, sys
+          root = pathlib.Path(sys.argv[1])
+          failures = []
+          for filename, command in [
+              ("mimo-original-keychains.txt", ["security", "list-keychains", "-d", "user", "-s"]),
+              ("mimo-original-default-keychain.txt", ["security", "default-keychain", "-d", "user", "-s"]),
+          ]:
+              path = root / filename
+              if path.exists():
+                  values = shlex.split(path.read_text())
+                  result = subprocess.run(command + values)
+                  if result.returncode:
+                      failures.append(filename)
+          keychain = os.environ.get("MIMO_RELEASE_KEYCHAIN", "")
+          if keychain and pathlib.Path(keychain).exists():
+              if subprocess.run(["security", "delete-keychain", keychain]).returncode:
+                  failures.append("temporary signing keychain deletion")
+          if failures:
+              raise SystemExit("Signing cleanup failed: " + ", ".join(failures))
+          PYTHON

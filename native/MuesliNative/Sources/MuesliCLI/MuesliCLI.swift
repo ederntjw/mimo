@@ -10,7 +10,14 @@ struct CLIContext {
         self.init(dbPath: options.dbPath, supportDir: options.supportDir)
     }
 
-    init(dbPath: String?, supportDir: String?) {
+    init(
+        dbPath: String?,
+        supportDir: String?,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        executableURL: URL = CLIAppLocation.executableURL,
+        applicationsDirectory: URL = URL(fileURLWithPath: "/Applications", isDirectory: true),
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) {
         if let dbPath, !dbPath.isEmpty {
             self.databaseURL = URL(fileURLWithPath: dbPath)
             self.supportDirectory = URL(fileURLWithPath: supportDir ?? self.databaseURL.deletingLastPathComponent().path)
@@ -23,23 +30,71 @@ struct CLIContext {
             return
         }
 
-        if let envDB = ProcessInfo.processInfo.environment["MUESLI_DB_PATH"], !envDB.isEmpty {
+        if let envDB = environment["MUESLI_DB_PATH"], !envDB.isEmpty {
             self.databaseURL = URL(fileURLWithPath: envDB)
-            self.supportDirectory = URL(fileURLWithPath: ProcessInfo.processInfo.environment["MUESLI_SUPPORT_DIR"] ?? self.databaseURL.deletingLastPathComponent().path)
+            self.supportDirectory = URL(fileURLWithPath: environment["MUESLI_SUPPORT_DIR"] ?? self.databaseURL.deletingLastPathComponent().path)
             return
         }
 
-        if let envSupport = ProcessInfo.processInfo.environment["MUESLI_SUPPORT_DIR"], !envSupport.isEmpty {
+        if let envSupport = environment["MUESLI_SUPPORT_DIR"], !envSupport.isEmpty {
             self.supportDirectory = URL(fileURLWithPath: envSupport)
             self.databaseURL = self.supportDirectory.appendingPathComponent("muesli.db")
             return
         }
 
-        self.supportDirectory = MuesliPaths.defaultSupportDirectoryURL()
+        self.supportDirectory = CLIAppLocation.supportDirectory(
+            executableURL: executableURL,
+            applicationsDirectory: applicationsDirectory,
+            homeDirectory: homeDirectory
+        )
         self.databaseURL = self.supportDirectory.appendingPathComponent("muesli.db")
     }
 
     var store: DictationStore { DictationStore(databaseURL: databaseURL) }
+}
+
+/// Resolve the data belonging to the app that ships this executable. This only
+/// chooses a path; it never migrates, creates, or deletes an existing library.
+enum CLIAppLocation {
+    static var executableURL: URL {
+        Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
+    }
+
+    static func appBundleURL(
+        executableURL: URL,
+        applicationsDirectory: URL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+    ) -> URL? {
+        let resolvedExecutable = executableURL.standardizedFileURL.resolvingSymlinksInPath()
+        let components = resolvedExecutable.pathComponents
+        if let index = components.lastIndex(of: "Contents"), index >= 1 {
+            let path = NSString.path(withComponents: Array(components.prefix(index)))
+            if path.hasSuffix(".app") { return URL(fileURLWithPath: path, isDirectory: true) }
+        }
+        for appName in ["Mimo.app", "Muesli.app"] {
+            let candidate = applicationsDirectory.appendingPathComponent(appName, isDirectory: true)
+            if FileManager.default.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
+    static func supportDirectory(
+        executableURL: URL,
+        applicationsDirectory: URL,
+        homeDirectory: URL
+    ) -> URL {
+        let appURL = appBundleURL(executableURL: executableURL, applicationsDirectory: applicationsDirectory)
+        let info = appURL.flatMap { app -> [String: Any]? in
+            guard let data = try? Data(contentsOf: app.appendingPathComponent("Contents/Info.plist")) else { return nil }
+            return (try? PropertyListSerialization.propertyList(from: data, format: nil)) as? [String: Any]
+        }
+        let configuredName = (info?["MuesliSupportDirectoryName"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let appName = (configuredName?.isEmpty == false ? configuredName : nil)
+            ?? appURL?.deletingPathExtension().lastPathComponent
+            ?? "Mimo"
+        return homeDirectory.appendingPathComponent("Library/Application Support", isDirectory: true)
+            .appendingPathComponent(appName, isDirectory: true)
+    }
 }
 
 struct ErrorBody: Encodable {
@@ -103,16 +158,7 @@ func timestampString(_ date: Date = Date()) -> String {
 }
 
 func appBundlePath() -> String? {
-    let executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
-    let components = executableURL.pathComponents
-    if let contentsIndex = components.lastIndex(of: "Contents"), contentsIndex >= 1 {
-        let bundlePath = NSString.path(withComponents: Array(components.prefix(contentsIndex)))
-        if bundlePath.hasSuffix(".app") {
-            return bundlePath
-        }
-    }
-    let defaultPath = "/Applications/Muesli.app"
-    return FileManager.default.fileExists(atPath: defaultPath) ? defaultPath : nil
+    CLIAppLocation.appBundleURL(executableURL: CLIAppLocation.executableURL)?.path
 }
 
 func emitSuccess<T: Encodable>(command: String, data: T, dbPath: URL, warnings: [String] = []) {
@@ -148,8 +194,8 @@ func emitJSON<T: Encodable>(_ value: T) {
 func ensureDatabaseAvailable(_ context: CLIContext, command: String) throws {
     guard context.store.databaseExists else {
         throw CLIError.databaseUnavailable(
-            "No Muesli database exists at the resolved path.",
-            fix: "Launch Muesli once or pass --db-path/--support-dir to point at the correct data directory."
+            "No Mimo database exists at the resolved path.",
+            fix: "Launch Mimo once or pass --db-path/--support-dir to point at the correct data directory."
         )
     }
 }
@@ -172,7 +218,7 @@ func migrationWarnings(_ context: CLIContext) -> [String] {
         return []
     } catch {
         return ["Schema migration failed: \(error.localizedDescription). "
-                + "Results may be missing fields added by newer Muesli versions."]
+                + "Results may be missing fields added by newer Mimo versions."]
     }
 }
 
@@ -198,7 +244,7 @@ struct GlobalOptions: ParsableArguments {
     @Option(name: .long, help: "Override the absolute path to muesli.db.")
     var dbPath: String?
 
-    @Option(name: .long, help: "Override the Muesli support directory. The CLI will look for muesli.db inside it.")
+    @Option(name: .long, help: "Override the support directory used by Mimo. Defaults to the containing or installed app's configured directory; the database filename remains muesli.db.")
     var supportDir: String?
 }
 
@@ -328,7 +374,7 @@ struct CommandSpecPayload: Encodable {
 struct MuesliCLI: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "muesli-cli",
-        abstract: "Agent-friendly CLI for local Muesli meetings and dictations.",
+        abstract: "Agent-friendly CLI for local Mimo meetings and dictations.",
         subcommands: [SpecCommand.self, InfoCommand.self, TranscribeCommand.self, MeetingsCommand.self, DictationsCommand.self]
     )
 
@@ -368,8 +414,8 @@ struct MuesliCLI: AsyncParsableCommand {
     static func specPayload() -> CommandSpecPayload {
         CommandSpecPayload(commands: [
             .init(name: "spec", usage: "muesli-cli spec", summary: "Dump the command tree and CLI schema metadata.", examples: ["muesli-cli spec"]),
-            .init(name: "info", usage: "muesli-cli info [--db-path <path>] [--support-dir <dir>]", summary: "Show resolved support and database paths.", examples: ["muesli-cli info", "muesli-cli info --support-dir ~/Library/Application\\ Support/Muesli"]),
-            .init(name: "transcribe", usage: "muesli-cli transcribe <file> [--format text|json|markdown] [--model parakeet-v3|parakeet-v2|parakeet-unified|parakeet-eou-320ms|sensevoice|qwen3-asr|nemotron35|whisper-tiny|whisper-tiny-english|whisper-small|whisper-small-english|whisper-medium-english|whisper-large-turbo] [--summarize] [--save-meeting] [--title <title>] [--output <path>] [--dictionary <path>]", summary: "Transcribe a local mp3, mp4, m4a, or wav file with Muesli's bundled local ASR models.", examples: ["muesli-cli transcribe call.mp3", "muesli-cli transcribe call.m4a --format json", "muesli-cli transcribe call.wav --model nemotron35 --dictionary dictionary.json"]),
+            .init(name: "info", usage: "muesli-cli info [--db-path <path>] [--support-dir <dir>]", summary: "Show resolved support and database paths.", examples: ["muesli-cli info", "muesli-cli info --support-dir ~/Library/Application\\ Support/Mimo"]),
+            .init(name: "transcribe", usage: "muesli-cli transcribe <file> [--format text|json|markdown] [--model parakeet-v3|parakeet-v2|parakeet-unified|parakeet-eou-320ms|sensevoice|qwen3-asr|nemotron35|whisper-tiny|whisper-tiny-english|whisper-small|whisper-small-english|whisper-medium-english|whisper-large-v3|whisper-large-turbo] [--summarize] [--save-meeting] [--title <title>] [--output <path>] [--dictionary <path>]", summary: "Transcribe a local mp3, mp4, m4a, or wav file with Mimo's bundled local ASR models.", examples: ["muesli-cli transcribe call.mp3", "muesli-cli transcribe call.m4a --format json", "muesli-cli transcribe call.wav --model whisper-large-v3", "muesli-cli transcribe call.wav --model nemotron35 --dictionary dictionary.json"]),
             .init(name: "meetings list", usage: "muesli-cli meetings list [--limit <n>] [--folder-id <id>]", summary: "List recent meetings.", examples: ["muesli-cli meetings list --limit 5", "muesli-cli meetings list --folder-id 2"]),
             .init(name: "meetings get", usage: "muesli-cli meetings get <id>", summary: "Return a full meeting record.", examples: ["muesli-cli meetings get 42"]),
             .init(name: "meetings update-notes", usage: "muesli-cli meetings update-notes <id> (--stdin | --file <path>)", summary: "Replace stored meeting notes only.", examples: ["muesli-cli meetings update-notes 42 --file notes.md", "cat notes.md | muesli-cli meetings update-notes 42 --stdin"]),
@@ -418,7 +464,7 @@ struct InfoCommand: ParsableCommand {
 }
 
 struct MeetingsCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "meetings", abstract: "Inspect and update Muesli meetings.", subcommands: [MeetingsListCommand.self, MeetingsGetCommand.self, MeetingsUpdateNotesCommand.self])
+    static let configuration = CommandConfiguration(commandName: "meetings", abstract: "Inspect and update Mimo meetings.", subcommands: [MeetingsListCommand.self, MeetingsGetCommand.self, MeetingsUpdateNotesCommand.self])
 }
 
 struct MeetingsListCommand: ParsableCommand {
@@ -433,7 +479,7 @@ struct MeetingsListCommand: ParsableCommand {
             throw CLIError.invalidInput("--limit must be greater than zero.", fix: "Pass a positive integer such as --limit 10.")
         }
         if !context.store.databaseExists {
-            emitSuccess(command: "muesli-cli meetings list", data: [MeetingListRow](), dbPath: context.databaseURL, warnings: ["No Muesli database exists at the resolved path."])
+            emitSuccess(command: "muesli-cli meetings list", data: [MeetingListRow](), dbPath: context.databaseURL, warnings: ["No Mimo database exists at the resolved path."])
             return
         }
         let (rows, warnings) = try withMigration(context) {
@@ -506,7 +552,7 @@ struct MeetingsUpdateNotesCommand: ParsableCommand {
 }
 
 struct DictationsCommand: ParsableCommand {
-    static let configuration = CommandConfiguration(commandName: "dictations", abstract: "Inspect Muesli dictations.", subcommands: [DictationsListCommand.self, DictationsGetCommand.self])
+    static let configuration = CommandConfiguration(commandName: "dictations", abstract: "Inspect Mimo dictations.", subcommands: [DictationsListCommand.self, DictationsGetCommand.self])
 }
 
 struct DictationsListCommand: ParsableCommand {
@@ -520,7 +566,7 @@ struct DictationsListCommand: ParsableCommand {
             throw CLIError.invalidInput("--limit must be greater than zero.", fix: "Pass a positive integer such as --limit 10.")
         }
         if !context.store.databaseExists {
-            emitSuccess(command: "muesli-cli dictations list", data: [DictationListRow](), dbPath: context.databaseURL, warnings: ["No Muesli database exists at the resolved path."])
+            emitSuccess(command: "muesli-cli dictations list", data: [DictationListRow](), dbPath: context.databaseURL, warnings: ["No Mimo database exists at the resolved path."])
             return
         }
         let (rows, warnings) = try withMigration(context) {

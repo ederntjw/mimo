@@ -1857,6 +1857,22 @@ struct DictationStoreTests {
         #expect(try store.liveTranscriptCheckpointText(meetingID: id) == nil)
     }
 
+    @Test("drained transcript snapshot preserves stop tails without duplicating live checkpoints")
+    func drainedTranscriptSnapshotPreservesStopTail() throws {
+        let store = try makeStore()
+        let id = try store.createLiveMeeting(title: "Stopped meeting", calendarEventID: nil, startTime: Date())
+        let first = LiveTranscriptCheckpointEntry(timestampLabel: "10:00:01", speaker: "You", startSeconds: 1, endSeconds: 2, text: "Original live draft.")
+        let tail = LiveTranscriptCheckpointEntry(timestampLabel: "10:00:03", speaker: "Others", startSeconds: 3, endSeconds: 5, text: "Preserve the final decision.")
+        try store.appendLiveTranscriptCheckpoints(meetingID: id, entries: [first])
+        try store.replaceLiveTranscriptCheckpoints(meetingID: id, entries: [first, tail])
+        try store.replaceLiveTranscriptCheckpoints(meetingID: id, entries: [])
+        #expect(try store.recoverLiveMeetingFromTranscriptCheckpoints(id: id))
+        let saved = try #require(try store.meeting(id: id))
+        #expect(saved.rawTranscript.components(separatedBy: "Original live draft.").count == 2)
+        #expect(saved.rawTranscript.contains("Preserve the final decision."))
+        #expect(saved.durationSeconds == 5)
+    }
+
     @Test("resumed meeting crash recovery preserves prior transcript and appends checkpoints")
     func resumedMeetingCrashRecoveryPreservesPriorTranscriptAndAppendsCheckpoints() throws {
         let store = try makeStore()

@@ -6,6 +6,7 @@ struct BackendOption: Equatable {
     struct Catalog {
         let systemManaged: [BackendOption]
         let all: [BackendOption]
+        let discovery: [BackendOption]
         let onboardingDefault: BackendOption
         let onboarding: [BackendOption]
     }
@@ -22,7 +23,7 @@ struct BackendOption: Equatable {
         model: "FluidInference/parakeet-unified-en-0.6b-coreml",
         label: "Parakeet Unified",
         sizeLabel: "~565 MB",
-        description: "The best English dictation. Lowest error rate, newest architecture, instant. For other languages, choose Parakeet v3.",
+        description: "Fast English-only dictation and meeting transcripts. For Mandarin Chinese and English in the same meeting, choose SenseVoice Small.",
         recommended: true
     )
 
@@ -31,7 +32,7 @@ struct BackendOption: Equatable {
         model: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
         label: "Parakeet v3",
         sizeLabel: "~450 MB",
-        description: "Fast, reliable dictation in 25 languages.",
+        description: "Fast transcription in 25 European languages, including English. Detects the spoken language automatically. Chinese is not supported; mixing supported languages has not been verified in Mimo.",
         recommended: false
     )
 
@@ -40,7 +41,7 @@ struct BackendOption: Equatable {
         model: "FluidInference/parakeet-tdt-0.6b-v2-coreml",
         label: "Parakeet v2",
         sizeLabel: "~450 MB",
-        description: "A quick, dependable English-only option. Choose it if you mainly dictate in English and prefer the older Parakeet model.",
+        description: "An older English-only model, retained for existing setups. Parakeet Unified is the current recommendation for English.",
         recommended: false
     )
 
@@ -48,8 +49,8 @@ struct BackendOption: Equatable {
         backend: "whisper",
         model: "small",
         label: "Whisper Small Multilingual",
-        sizeLabel: "~250 MB",
-        description: "A balanced multilingual Whisper option for everyday notes. It handles accents and background noise better than Tiny while keeping the download modest. Auto-detect language by default, or choose one yourself.",
+        sizeLabel: "~487 MB",
+        description: "An older multilingual option retained for existing setups. Detects the spoken language automatically; language coverage does not guarantee reliable mixing. Choose Whisper Large Turbo for new multilingual setups.",
         recommended: false
     )
 
@@ -57,8 +58,8 @@ struct BackendOption: Equatable {
         backend: "whisper",
         model: "tiny",
         label: "Whisper Tiny Multilingual",
-        sizeLabel: "~153 MB",
-        description: "The quickest Whisper download and lightest multilingual option for occasional notes. It gives up some accuracy on accents, noise, and longer speech. Auto-detect language by default, or choose one yourself.",
+        sizeLabel: "~77 MB",
+        description: "An older, lightweight multilingual option retained for existing setups. Accuracy is limited on difficult speech and mixed languages. Choose SenseVoice Small for fast Mandarin Chinese and English meetings.",
         recommended: false
     )
 
@@ -67,15 +68,24 @@ struct BackendOption: Equatable {
         model: "large-v3-v20240930_626MB",
         label: "Whisper Large Turbo Multilingual",
         sizeLabel: "~626 MB",
-        description: "Whisper's strongest multilingual option. Better for mixed languages and difficult audio, with a larger download and more processing time than Small. Auto-detect language by default, or pin a language.",
-        recommended: false
+        description: "Broad language coverage for dictation and meeting transcripts. Mandarin Chinese and English mixing has been tested in Mimo. Use Auto-detect for mixed speech; SenseVoice Small favors faster meeting updates.",
+        recommended: true
+    )
+
+    static let whisperLargeV3 = BackendOption(
+        backend: "whisper",
+        model: "large-v3",
+        label: "Whisper Large v3",
+        sizeLabel: "~3.1 GB",
+        description: "Full multilingual Whisper model for the complete recording after a meeting. Favors accuracy over speed and memory use; compare its results with the live draft before producing minutes.",
+        recommended: true
     )
 
     static let whisperTinyEnglish = BackendOption(
         backend: "whisper",
         model: "tiny.en",
         label: "Whisper Tiny English",
-        sizeLabel: "~153 MB",
+        sizeLabel: "~77 MB",
         description: "The quickest English-only Whisper option for lightweight notes. Choose it when you always speak English and do not need automatic language detection.",
         recommended: false
     )
@@ -84,7 +94,7 @@ struct BackendOption: Equatable {
         backend: "whisper",
         model: "small.en",
         label: "Whisper Small English",
-        sizeLabel: "~250 MB",
+        sizeLabel: "~487 MB",
         description: "A balanced English-only Whisper option for everyday dictation. It handles accents and background noise better than Tiny when you do not need other languages.",
         recommended: false
     )
@@ -103,7 +113,7 @@ struct BackendOption: Equatable {
         model: "FluidInference/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML",
         label: "Nemotron 3.5 Multilingual",
         sizeLabel: "~665 MB",
-        description: "Live text appears as you speak in more than 100 locales, including Hindi, Chinese, and Japanese, with language auto-detection and punctuation. It works for hold-to-talk, hands-free dictation, and meetings, but it only appends words—it does not go back to correct earlier text.",
+        description: "Live text in 32 supported locales, including Mandarin Chinese and English. Auto-detection identifies utterance languages; reliable switching within a sentence has not been verified in Mimo. Use Chinese + English meeting mode with SenseVoice for mixed-language segments.",
         recommended: false
     )
 
@@ -112,7 +122,7 @@ struct BackendOption: Equatable {
         model: "phequals/cohere-transcribe-coreml-mixed-precision",
         label: "Cohere Transcribe",
         sizeLabel: "~3.8 GB",
-        description: "The most deliberate option for difficult accents and tricky audio. It supports 14 languages and can be more accurate than faster models, but the download is large and you only see the result after you stop speaking.",
+        description: "A large model for recordings in one of 14 languages. Choose one language before recording. It does not automatically detect language, and mixed-language results are inconsistent. Retained for existing setups.",
         recommended: false
     )
 
@@ -130,8 +140,8 @@ struct BackendOption: Equatable {
         model: "FluidInference/sensevoice-small-coreml",
         label: "SenseVoice Small",
         sizeLabel: SenseVoiceTranscriber.downloadedModelSizeLabel,
-        description: "A compact option covering more than 50 languages, with punctuation included in the result. Quality varies by language and accent, so try it with your own voice before relying on it.",
-        recommended: false
+        description: "Recommended for fast Mandarin Chinese and English meetings. This language pair has been tested mixed in Mimo. Also supports Cantonese, Japanese, and Korean; mixing other language pairs has not been verified. Meeting text updates in short batches.",
+        recommended: true
     )
 
     static let gemma4E2BLiteRT = BackendOption(
@@ -164,7 +174,7 @@ struct BackendOption: Equatable {
         model: "apple-speech-transcriber",
         label: "Apple Speech",
         sizeLabel: "System managed",
-        description: "Apple's private, on-device speech model for macOS 26. It is designed for dictation, meetings, distant speakers, and long recordings, while macOS manages the language assets and updates.",
+        description: "On-device transcription managed by macOS 26. Choose one supported language before recording; Mimo uses one language per session. macOS supplies the available languages and updates.",
         recommended: false
     )
 
@@ -178,7 +188,7 @@ struct BackendOption: Equatable {
     static let whisperFamily: [BackendOption] = [
         .whisperTiny, .whisperTinyEnglish,
         .whisperSmall, .whisperSmallEnglish,
-        .whisperMediumEnglish, .whisperLargeTurbo,
+        .whisperMediumEnglish, .whisperLargeTurbo, .whisperLargeV3,
     ]
 
     static let qwen3Asr = BackendOption(
@@ -186,12 +196,12 @@ struct BackendOption: Equatable {
         model: "FluidInference/qwen3-asr-0.6b-coreml",
         label: "Qwen3 ASR",
         sizeLabel: "~1.3 GB",
-        description: "Experimental multilingual transcription across 52 languages. Accuracy can vary noticeably for accented English, so try it with your own voice before relying on it. Expect a short 2–3 second wait compared with Parakeet, and about 30 seconds of one-time preparation the first time it runs.",
+        description: "Experimental transcription across 30 languages and 22 Chinese dialects. Automatic language detection is available; mixed-language reliability has not been verified in Mimo. Preparation and transcription can be slow, so it is retained for existing setups.",
         recommended: false
     )
 
     static let experimental: [BackendOption] = [
-        .senseVoiceSmall, .indicASR, .gemma4E2BLiteRT, .gemma4E4BLiteRT, .qwen3Asr,
+        .indicASR, .gemma4E2BLiteRT, .gemma4E4BLiteRT, .qwen3Asr,
     ]
 
     /// Native streaming backends used by low-latency product surfaces.
@@ -206,20 +216,21 @@ struct BackendOption: Equatable {
         let all = systemManaged
             + parakeetFamily
             + whisperFamily
-            + [.cohereTranscribe]
+            + [.senseVoiceSmall, .cohereTranscribe]
             + streaming
             + experimental
-        // Parakeet Unified (English) and v3 (multilingual) are the preferred
-        // onboarding models; Apple Speech remains available in the catalog.
+        // Discovery is intentionally separate from the complete compatibility
+        // catalog: saved IDs and downloaded older models must keep resolving.
+        let discovery: [BackendOption] = [
+            .senseVoiceSmall, .whisperLargeV3, .whisperLargeTurbo, .parakeetUnified,
+            .parakeetMultilingual, .nemotron35Multilingual,
+        ] + systemManaged
         let onboardingDefault: BackendOption = .parakeetUnified
         let onboardingCandidates: [BackendOption] = [
             onboardingDefault,
-            .parakeetUnified,
+            .senseVoiceSmall,
+            .whisperLargeTurbo,
             .parakeetMultilingual,
-            .whisperTiny,
-            .whisperSmall,
-            .cohereTranscribe,
-            .nemotron35Multilingual,
         ]
         let onboarding = onboardingCandidates.reduce(into: [BackendOption]()) { options, option in
             if !options.contains(option) {
@@ -230,6 +241,7 @@ struct BackendOption: Equatable {
         return Catalog(
             systemManaged: systemManaged,
             all: all,
+            discovery: discovery,
             onboardingDefault: onboardingDefault,
             onboarding: onboarding
         )
@@ -244,12 +256,35 @@ struct BackendOption: Equatable {
 
     static let systemManaged = currentCatalog.systemManaged
 
-    /// Models available for download and use.
+    /// Complete compatibility catalog, including models hidden from discovery.
     static let all = currentCatalog.all
 
-    /// The first-run default is Parakeet Unified (English), with Parakeet v3
-    /// (multilingual) as the second candidate; Apple Speech remains available
-    /// in the catalog but is not the onboarding default.
+    /// Current choices offered for new setups. Older installed models remain usable.
+    static let discovery = currentCatalog.discovery
+
+    var isCurated: Bool {
+        Self.discovery.contains { $0.backend == backend && $0.model == model }
+    }
+
+    /// Includes explicitly retained models without consulting files or app state.
+    static func discoveryOptions(including retained: [BackendOption]) -> [BackendOption] {
+        retained.reduce(into: discovery) { result, option in
+            guard let known = resolve(backend: option.backend, model: option.model),
+                  !result.contains(where: { $0.backend == known.backend && $0.model == known.model }) else { return }
+            result.append(known)
+        }
+    }
+
+    /// Filters a caller's available models; it never adds unavailable models or
+    /// changes a saved selection. Pass active choices in `retaining`.
+    static func curatedOptions(from options: [BackendOption], retaining: [BackendOption] = []) -> [BackendOption] {
+        options.filter { option in
+            option.isCurated || retaining.contains { $0.backend == option.backend && $0.model == option.model }
+        }
+    }
+
+    /// The first-run default is Parakeet Unified (English). SenseVoice, Whisper
+    /// Turbo and Parakeet v3 cover the curated multilingual alternatives.
     static let onboardingDefault = currentCatalog.onboardingDefault
 
     /// Curated first-run choices. Experimental models are excluded by default.
@@ -294,19 +329,46 @@ struct BackendOption: Equatable {
         !isStreamingDictationBackend
     }
 
+    /// Eligible routes for Mandarin/English meetings. Smoke-tested pair guidance
+    /// is scoped to SenseVoice and Large Turbo; older Whisper sizes stay compatible.
+    var supportsChineseEnglishMeetingTranscription: Bool {
+        self == .senseVoiceSmall || supportsWhisperLanguageSelection
+    }
+
+    static let chineseEnglishMeetingPreference: [BackendOption] = [
+        .senseVoiceSmall, .whisperLargeTurbo, .whisperSmall, .whisperTiny,
+    ]
+
+    static func resolvedChineseEnglishMeetingBackend(
+        configured: BackendOption?,
+        availableOptions: [BackendOption]
+    ) -> BackendOption? {
+        let available = availableOptions.filter(\.supportsChineseEnglishMeetingTranscription)
+        if let configured, available.contains(configured) { return configured }
+        return chineseEnglishMeetingPreference.first { available.contains($0) }
+    }
+
     var supportsLiveMeetingTranscription: Bool {
         Self.parakeetFamily.contains(self) || self == .appleSpeechAnalyzer
+            || supportsChineseEnglishMeetingTranscription
     }
 
     static func resolvedLiveMeetingTranscriptionBackend(
         configured: BackendOption?,
-        availableOptions: [BackendOption]
+        availableOptions: [BackendOption],
+        chineseEnglishBilingual: Bool = false
     ) -> BackendOption? {
+        if chineseEnglishBilingual {
+            return resolvedChineseEnglishMeetingBackend(
+                configured: configured, availableOptions: availableOptions
+            )
+        }
         let available = availableOptions.filter(\.supportsLiveMeetingTranscription)
         if let configured, available.contains(configured) {
             return configured
         }
-        return (parakeetFamily + [.appleSpeechAnalyzer]).first { available.contains($0) }
+        return (parakeetFamily + [.appleSpeechAnalyzer] + chineseEnglishMeetingPreference)
+            .first { available.contains($0) }
     }
 
     var isSystemManaged: Bool {
@@ -529,6 +591,12 @@ enum ParakeetLanguage: String, CaseIterable, Codable, Sendable {
     case serbian = "sr"
     case greek = "el"
 
+    /// NVIDIA v3's 25 documented languages plus Auto-detect. The extra legacy
+    /// script-filter hints remain decodable for existing configurations.
+    static let discoveryCases: [Self] = allCases.filter {
+        $0 != .bosnian && $0 != .belarusian && $0 != .serbian
+    }
+
     static let defaultLanguage: Self = .auto
 
     var label: String {
@@ -705,21 +773,23 @@ struct SummaryModelPreset {
     ]
 
     static let chatGPTModels: [SummaryModelPreset] = [
-        SummaryModelPreset(id: "gpt-5.4-mini", label: "GPT-5.4 Mini (default)"),
+        SummaryModelPreset(id: "auto", label: "Automatic (fast)"),
+        SummaryModelPreset(id: "gpt-5.6-luna", label: "GPT-5.6 Luna"),
         SummaryModelPreset(id: "gpt-5.6-sol", label: "GPT-5.6 Sol"),
         SummaryModelPreset(id: "gpt-5.6-terra", label: "GPT-5.6 Terra"),
-        SummaryModelPreset(id: "gpt-5.6-luna", label: "GPT-5.6 Luna"),
+        SummaryModelPreset(id: "gpt-6-astra", label: "GPT-6 Astra"),
     ]
 
     static let chatGPTTranscriptCleanupModels: [SummaryModelPreset] = [
         SummaryModelPreset(id: "gpt-5.6-terra", label: "GPT-5.6 Terra (default)"),
-        SummaryModelPreset(id: "gpt-5.4-mini", label: "GPT-5.4 Mini"),
+        SummaryModelPreset(id: "auto", label: "Automatic (fast)"),
         SummaryModelPreset(id: "gpt-5.6-sol", label: "GPT-5.6 Sol"),
         SummaryModelPreset(id: "gpt-5.6-luna", label: "GPT-5.6 Luna"),
     ]
 
     private static let unsupportedChatGPTModelIDs: Set<String> = [
         "chat-latest",
+        "gpt-5.4-mini",
         "gpt-5.4-nano",
     ]
 
@@ -749,6 +819,21 @@ struct SummaryModelPreset {
     static func supportedChatGPTModel(_ model: String) -> String {
         let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
         return unsupportedChatGPTModelIDs.contains(trimmed) ? "" : trimmed
+    }
+
+    static func accountChatGPTPresets(_ available: [ChatGPTAvailableModel]) -> [SummaryModelPreset] {
+        let selectable = available.filter {
+            !$0.slug.isEmpty && supportedChatGPTModel($0.slug) == $0.slug
+        }
+        return [SummaryModelPreset(id: "auto", label: "Automatic (fast)")] + selectable.map {
+            SummaryModelPreset(id: $0.slug, label: $0.displayName ?? $0.slug)
+        }
+    }
+
+    static func chatGPTModelLabel(_ model: String) -> String {
+        let selected = supportedChatGPTModel(model)
+        guard !selected.isEmpty else { return "Automatic (fast)" }
+        return chatGPTModels.first(where: { $0.id == selected })?.label ?? selected
     }
 
     static func reasoningEffort(for model: String) -> String? {
@@ -1064,9 +1149,9 @@ struct PostProcessorOption: Identifiable, Equatable {
     /// downloaded again.
     static let legacyV2 = PostProcessorOption(
         id: "qwen3-postproc-v2",
-        label: "Muesli Cleanup (Legacy)",
+        label: "Mimo Cleanup (Legacy)",
         sizeLabel: "~390 MB",
-        description: "An earlier cleanup model for Muesli dictation. It handles filler words, corrections, and spoken lists, but is less consistent than the current model.",
+        description: "An earlier cleanup model for Mimo dictation. It handles filler words, corrections, and spoken lists, but is less consistent than the current model.",
         downloadURL: URL(string: "https://huggingface.co/phequals/qwen3-postproc-v2/resolve/main/qwen3-postproc-v2-q4_k_m.gguf")!,
         filename: "qwen3-postproc-v2-q4_k_m.gguf",
         isDownloadable: false
@@ -1075,9 +1160,9 @@ struct PostProcessorOption: Identifiable, Equatable {
     // Vanilla Qwen3.5-0.8B. Stable for basic cleanup; does not reliably convert spoken list cues.
     static let qwen35_0_8b = PostProcessorOption(
         id: "qwen35-0.8b",
-        label: "Qwen Basic Cleanup",
+        label: "Qwen 3.5 0.8B",
         sizeLabel: "~533 MB",
-        description: "A general-purpose option for typos and filler words. It may miss “scratch that” edits and spoken list formatting.",
+        description: "Compact multilingual text editing and Quill rewriting. Good for simple instructions; specialized cleanup models handle correction cues and spoken lists more consistently.",
         downloadURL: URL(string: "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf")!,
         filename: "Qwen3.5-0.8B-Q4_K_M.gguf"
     )
@@ -1101,9 +1186,9 @@ struct PostProcessorOption: Identifiable, Equatable {
     // Fine-tuned Qwen3.5-0.8B v3 trained on Muesli dictation correction data.
     static let finetunedV3 = PostProcessorOption(
         id: "qwen35-postproc-v3",
-        label: "Muesli Cleanup",
+        label: "Mimo Cleanup",
         sizeLabel: "~505 MB",
-        description: "The best overall choice for everyday dictation. It removes filler words, follows “scratch that,” and turns spoken list cues into clean formatting.",
+        description: "Specialized dictation cleanup for filler words, “scratch that” corrections, and spoken lists. Use Qwen 3.5 0.8B for general rewriting instructions.",
         downloadURL: URL(string: "https://huggingface.co/phequals/qwen35-postproc-v3-gguf/resolve/main/qwen35-postproc-v3-Q4_K_M.gguf")!,
         filename: "qwen35-postproc-v3-Q4_K_M.gguf"
     )
@@ -1111,7 +1196,7 @@ struct PostProcessorOption: Identifiable, Equatable {
     static let s1Mini = PostProcessorOption(
         id: "superwhisper-s1-mini",
         label: "S1-mini by Superwhisper",
-        sizeLabel: "~462 MB",
+        sizeLabel: "~484 MB",
         description: "English-only speech-to-text normalization with reliable filler removal, corrections, punctuation, capitalization, and written numbers, dates, times, currency, and email addresses.",
         downloadURL: URL(string: "https://huggingface.co/superwhisper/s1-mini-GGUF/resolve/main/s1-mini-q4_k_m.gguf")!,
         filename: "s1-mini-q4_k_m.gguf",
@@ -1541,6 +1626,9 @@ struct AppConfig: Codable {
     var qwen3AsrLanguage: String = Qwen3AsrLanguage.defaultLanguage.rawValue
     var parakeetLanguage: String = ParakeetLanguage.defaultLanguage.rawValue
     var appleSpeechLanguage: String = AppleSpeechLanguageOption.systemIdentifier
+    var meetingChineseEnglishBilingual: Bool = false
+    var meetingFinalPassEnabled: Bool = true
+    var meetingFinalTranscriptionModel: String = BackendOption.whisperLargeV3.model
     var meetingTranscriptionBackend: String = BackendOption.whisper.backend
     var meetingTranscriptionModel: String = BackendOption.whisper.model
     var meetingSummaryBackend: String = MeetingSummaryBackendOption.chatGPT.backend
@@ -1647,6 +1735,7 @@ struct AppConfig: Codable {
     var autoExportFileFormat: String = MeetingAutoExportFileFormat.markdown.rawValue
     var iCloudSyncEnabled: Bool = false
     var showIOSCompanionPrompt: Bool = true
+    // Legacy saved preferences only; Mimo no longer presents contribution promotions.
     var contributionPromptNextWordCount: Int?
     var contributionPromptNextMeetingCount: Int?
     var contributionGitHubStarClicked: Bool = false
@@ -1680,6 +1769,9 @@ struct AppConfig: Codable {
         case qwen3AsrLanguage = "qwen3_asr_language"
         case parakeetLanguage = "parakeet_language"
         case appleSpeechLanguage = "apple_speech_language"
+        case meetingChineseEnglishBilingual = "meeting_chinese_english_bilingual"
+        case meetingFinalPassEnabled = "meeting_final_pass_enabled"
+        case meetingFinalTranscriptionModel = "meeting_final_transcription_model"
         case meetingTranscriptionBackend = "meeting_transcription_backend"
         case meetingTranscriptionModel = "meeting_transcription_model"
         case meetingSummaryBackend = "meeting_summary_backend"
@@ -1826,6 +1918,9 @@ struct AppConfig: Codable {
         qwen3AsrLanguage = Qwen3AsrLanguage.resolvedCode(try? c.decode(String.self, forKey: .qwen3AsrLanguage))
         parakeetLanguage = ParakeetLanguage.resolvedCode(try? c.decode(String.self, forKey: .parakeetLanguage))
         appleSpeechLanguage = AppleSpeechLanguageOption.normalize(try? c.decode(String.self, forKey: .appleSpeechLanguage))
+        meetingChineseEnglishBilingual = (try? c.decode(Bool.self, forKey: .meetingChineseEnglishBilingual)) ?? false
+        meetingFinalPassEnabled = (try? c.decode(Bool.self, forKey: .meetingFinalPassEnabled)) ?? defaults.meetingFinalPassEnabled
+        meetingFinalTranscriptionModel = (try? c.decode(String.self, forKey: .meetingFinalTranscriptionModel)) ?? defaults.meetingFinalTranscriptionModel
         meetingTranscriptionBackend = (try? c.decode(String.self, forKey: .meetingTranscriptionBackend)) ?? sttBackend
         meetingTranscriptionModel = (try? c.decode(String.self, forKey: .meetingTranscriptionModel)) ?? sttModel
         meetingSummaryBackend = (try? c.decode(String.self, forKey: .meetingSummaryBackend)) ?? defaults.meetingSummaryBackend
@@ -1898,9 +1993,7 @@ struct AppConfig: Codable {
         )
         openRouterModel = (try? c.decode(String.self, forKey: .openRouterModel)) ?? defaults.openRouterModel
         chatGPTModel = SummaryModelPreset.supportedChatGPTModel(
-            SummaryModelPreset.migratedFromGPT55(
-                (try? c.decode(String.self, forKey: .chatGPTModel)) ?? defaults.chatGPTModel
-            )
+            (try? c.decode(String.self, forKey: .chatGPTModel)) ?? defaults.chatGPTModel
         )
         meetingSummaryRetryCount = MeetingSummaryRetryPolicy.clampedRetryCount(
             (try? c.decode(Int.self, forKey: .meetingSummaryRetryCount)) ?? defaults.meetingSummaryRetryCount
@@ -1971,9 +2064,7 @@ struct AppConfig: Codable {
             .repoID
         activePostProcessorId = (try? c.decode(String.self, forKey: .activePostProcessorId)) ?? defaults.activePostProcessorId
         postProcessorChatGPTModel = SummaryModelPreset.supportedChatGPTModel(
-            SummaryModelPreset.migratedFromGPT55(
-                (try? c.decode(String.self, forKey: .postProcessorChatGPTModel)) ?? defaults.postProcessorChatGPTModel
-            )
+            (try? c.decode(String.self, forKey: .postProcessorChatGPTModel)) ?? defaults.postProcessorChatGPTModel
         )
         postProcessorOpenAIModel = SummaryModelPreset.migratedFromGPT55(
             (try? c.decode(String.self, forKey: .postProcessorOpenAIModel)) ?? defaults.postProcessorOpenAIModel
@@ -2046,8 +2137,25 @@ struct AppConfig: Codable {
         AppleSpeechLanguageOption.normalize(appleSpeechLanguage)
     }
 
+    var resolvedMeetingWhisperLanguage: WhisperKitLanguage {
+        meetingFinalPassEnabled || meetingChineseEnglishBilingual ? .auto : resolvedWhisperLanguage
+    }
+
+    var resolvedMeetingFinalBackend: BackendOption {
+        MeetingTranscriptionPlan.finalModels.first { $0.model == meetingFinalTranscriptionModel } ?? .whisperLargeV3
+    }
+
+    var meetingLiveStreamingPartialsEnabled: Bool {
+        enableLiveStreamingPartials && !meetingFinalPassEnabled
+    }
+
+    var resolvedMeetingNemotron35Language: Nemotron35Language {
+        meetingChineseEnglishBilingual ? .auto : resolvedNemotron35Language
+    }
+
     var resolvedMeetingLiveCaptionBackend: MeetingLiveCaptionBackend {
-        MeetingLiveCaptionBackend.resolved(meetingLiveCaptionBackend)
+        // English-only previews must never replace or misrepresent bilingual speech.
+        meetingChineseEnglishBilingual ? .nemotron35 : MeetingLiveCaptionBackend.resolved(meetingLiveCaptionBackend)
     }
 
     var resolvedOnboardingUseCase: OnboardingUseCase {

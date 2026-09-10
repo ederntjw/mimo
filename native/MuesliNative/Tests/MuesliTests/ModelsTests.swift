@@ -86,8 +86,8 @@ struct BackendOptionTests {
     func qwenAsrIsExperimental() {
         #expect(BackendOption.all.contains(.qwen3Asr))
         #expect(BackendOption.experimental.contains(.qwen3Asr))
-        #expect(BackendOption.qwen3Asr.description.contains("52 languages"))
-        #expect(BackendOption.qwen3Asr.description.contains("2–3 second"))
+        #expect(BackendOption.qwen3Asr.description.contains("30 languages and 22 Chinese dialects"))
+        #expect(BackendOption.qwen3Asr.speechGuidance.switching == .automaticDetection)
     }
 
     @Test("model descriptions explain usage without implementation jargon")
@@ -305,24 +305,90 @@ struct BackendOptionTests {
         #expect(!BackendOption.experimental.contains(.cohereTranscribe))
     }
 
-    @Test("onboarding prefers Parakeet Unified and v3 over Apple Speech")
+    @Test("onboarding offers current English and multilingual choices")
     func onboardingModelChoices() {
         #expect(BackendOption.onboarding.first == BackendOption.onboardingDefault)
         #expect(BackendOption.onboardingDefault == .parakeetUnified)
         #expect(BackendOption.onboarding.contains(.parakeetUnified))
         #expect(BackendOption.onboarding.contains(.parakeetMultilingual))
-        #expect(BackendOption.onboarding.contains(.whisperTiny))
-        #expect(BackendOption.onboarding.contains(.whisperSmall))
-        #expect(BackendOption.onboarding.contains(.cohereTranscribe))
+        #expect(BackendOption.onboarding.contains(.senseVoiceSmall))
+        #expect(BackendOption.onboarding.contains(.whisperLargeTurbo))
+        #expect(!BackendOption.onboarding.contains(.whisperTiny))
+        #expect(!BackendOption.onboarding.contains(.whisperSmall))
+        #expect(!BackendOption.onboarding.contains(.cohereTranscribe))
         for option in BackendOption.experimental {
             #expect(!BackendOption.onboarding.contains(option))
         }
-        #expect(BackendOption.onboarding.contains(.nemotron35Multilingual))
+        #expect(!BackendOption.onboarding.contains(.nemotron35Multilingual))
         if #available(macOS 26.0, *), AppleSpeechAnalyzerTranscriber.isSupportedOnCurrentSystem {
             #expect(!BackendOption.onboarding.contains(.appleSpeechAnalyzer))
         } else {
             #expect(!BackendOption.onboarding.contains(.appleSpeechAnalyzer))
         }
+    }
+
+    @Test("curated discovery hides retired choices without losing saved model IDs")
+    func speechDiscoveryPreservesCompatibility() {
+        let catalog = BackendOption.catalog(appleSpeechAvailable: false)
+        #expect(catalog.discovery == [
+            .senseVoiceSmall, .whisperLargeTurbo, .parakeetUnified,
+            .parakeetMultilingual, .nemotron35Multilingual,
+        ])
+        #expect(BackendOption.catalog(appleSpeechAvailable: true).discovery.contains(.appleSpeechAnalyzer))
+        for retired: BackendOption in [.whisperTinyEnglish, .whisperSmall, .parakeetEnglish, .cohereTranscribe, .qwen3Asr, .gemma4E2BLiteRT] {
+            #expect(!catalog.discovery.contains(retired))
+            #expect(catalog.all.contains(retired))
+            #expect(BackendOption.resolve(backend: retired.backend, model: retired.model) == retired)
+        }
+        let visible = BackendOption.discoveryOptions(including: [.whisperTinyEnglish, .whisperTinyEnglish, .senseVoiceSmall])
+        #expect(visible.filter { $0 == .whisperTinyEnglish }.count == 1)
+        #expect(visible.filter { $0 == .senseVoiceSmall }.count == 1)
+    }
+
+    @Test("downloaded picker keeps an active retired choice but adds no missing models")
+    func curatedAvailableSelection() {
+        let downloaded: [BackendOption] = [.whisperTinyEnglish, .parakeetEnglish, .senseVoiceSmall]
+        #expect(BackendOption.curatedOptions(from: downloaded) == [.senseVoiceSmall])
+        #expect(BackendOption.curatedOptions(from: downloaded, retaining: [.whisperTinyEnglish]) == [.whisperTinyEnglish, .senseVoiceSmall])
+        #expect(BackendOption.curatedOptions(from: downloaded, retaining: [.whisperLargeTurbo]) == [.senseVoiceSmall])
+        #expect(BackendOption.curatedOptions(from: [], retaining: [.whisperTinyEnglish]).isEmpty)
+        #expect(BackendOption.resolveDownloaded(
+            backend: "whisper", model: "tiny.en", fallback: .senseVoiceSmall,
+            downloadedOptions: BackendOption.curatedOptions(from: downloaded, retaining: [.whisperTinyEnglish])
+        ) == .whisperTinyEnglish)
+    }
+
+    @Test("language coverage does not imply verified same-session switching")
+    func speechLanguageCoverageAndSwitchingAreSeparate() {
+        #expect(BackendOption.senseVoiceSmall.speechGuidance.languages.count == 5)
+        #expect(BackendOption.senseVoiceSmall.speechGuidance.switching == .chineseEnglishTested)
+        #expect(BackendOption.whisperLargeTurbo.speechGuidance.switching == .chineseEnglishTested)
+        #expect(BackendOption.whisperSmall.speechGuidance.switching == .automaticDetection)
+        #expect(BackendOption.nemotron35Multilingual.speechGuidance.switching == .automaticDetection)
+        #expect(BackendOption.cohereTranscribe.speechGuidance.languages.contains("Mandarin Chinese"))
+        #expect(BackendOption.cohereTranscribe.speechGuidance.switching == .chooseOneLanguage)
+        #expect(BackendOption.appleSpeechAnalyzer.speechGuidance.switching == .chooseOneLanguage)
+        #expect(BackendOption.indicASR.speechGuidance.languages.count == 7)
+        #expect(BackendOption.indicASR.speechGuidance.switching == .chooseOneLanguage)
+        #expect(BackendOption.whisperTinyEnglish.speechGuidance.languages == ["English"])
+        #expect(BackendOption.whisperTinyEnglish.speechGuidance.switching == .englishOnly)
+    }
+
+    @Test("language lists use shipped-model coverage rather than larger family claims")
+    func speechLanguageListsMatchModelScope() {
+        let parakeet = BackendOption.parakeetMultilingual.speechGuidance.languages
+        #expect(parakeet.count == 25)
+        #expect(!parakeet.contains("Mandarin Chinese"))
+        #expect(!parakeet.contains("Serbian"))
+        let nemotron = BackendOption.nemotron35Multilingual.speechGuidance.languages
+        #expect(nemotron.count == 28)
+        #expect(nemotron.contains("Mandarin Chinese"))
+        #expect(!nemotron.contains("Greek"))
+        #expect(!nemotron.contains("Thai"))
+        #expect(BackendOption.whisperSmall.speechGuidance.languages.count == 99)
+        #expect(BackendOption.whisperLargeTurbo.speechGuidance.languages.count == 100)
+        #expect(BackendOption.qwen3Asr.speechGuidance.languages.count == 30)
+        #expect(BackendOption.cohereTranscribe.speechGuidance.languages.count == 14)
     }
 
     @Test("only Nemotron backends use streaming dictation")
@@ -667,7 +733,8 @@ struct SummaryModelPresetTests {
     @Test("ChatGPT presets include supported fast options")
     func chatGPTModels() {
         #expect(!SummaryModelPreset.chatGPTModels.isEmpty)
-        #expect(SummaryModelPreset.chatGPTModels.first?.id == "gpt-5.4-mini")
+        #expect(SummaryModelPreset.chatGPTModels.first?.id == "auto")
+        #expect(!SummaryModelPreset.chatGPTModels.contains { $0.id == "gpt-5.4-mini" })
         #expect(SummaryModelPreset.chatGPTModels.contains { $0.id == "gpt-5.6-sol" })
         #expect(SummaryModelPreset.chatGPTModels.contains { $0.id == "gpt-5.6-terra" })
         #expect(SummaryModelPreset.chatGPTModels.contains { $0.id == "gpt-5.6-luna" })
@@ -689,7 +756,7 @@ struct SummaryModelPresetTests {
         #expect(presets.first?.id == "gpt-5.6-terra")
         #expect(presets.first?.label.contains("default") == true)
         #expect(Set(presets.map(\.id)) == Set([
-            "gpt-5.4-mini",
+            "auto",
             "gpt-5.6-sol",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
@@ -1214,7 +1281,7 @@ struct AppConfigTests {
         #expect(decoded.customLLMFormat == "anthropic")
         #expect(decoded.meetingSummaryRetryCount == 5)
         #expect(decoded.postProcessorBackend == "openrouter")
-        #expect(decoded.postProcessorChatGPTModel == "gpt-5.4-mini")
+        #expect(decoded.postProcessorChatGPTModel.isEmpty)
         #expect(decoded.postProcessorOpenAIModel == "gpt-5.4-mini")
         #expect(decoded.postProcessorOpenRouterModel == "openrouter/test-model")
         #expect(decoded.postProcessorOllamaModel == "qwen3.5")
@@ -1687,7 +1754,7 @@ struct AppConfigTests {
         #expect(config.postProcessorChatGPTModel.isEmpty)
     }
 
-    @Test("stored GPT-5.5 selections migrate to GPT-5.6 Sol")
+    @Test("ChatGPT selections remain intact while legacy API selections migrate")
     func storedGPT55SelectionsMigrateToSol() throws {
         let json = """
         {
@@ -1702,9 +1769,9 @@ struct AppConfigTests {
 
         #expect(config.computerUsePlannerModel == "gpt-5.6-sol")
         #expect(config.openAIModel == "gpt-5.6-sol")
-        #expect(config.chatGPTModel == "gpt-5.6-sol")
+        #expect(config.chatGPTModel == "gpt-5.5")
         #expect(config.postProcessorOpenAIModel == "gpt-5.6-sol")
-        #expect(config.postProcessorChatGPTModel == "gpt-5.6-sol")
+        #expect(config.postProcessorChatGPTModel == "gpt-5.5")
     }
 
     @Test("legacy completed onboarding enables meetings when use case is missing")
@@ -3094,7 +3161,19 @@ struct ParakeetUnifiedPlanTests {
     }
 }
 
+@Suite("Parakeet languages")
 struct ParakeetLanguageTests {
+
+    @Test("Parakeet language discovery hides unsupported hints while preserving saved values")
+    func documentedLanguagesRetainLegacyDecoding() {
+        #expect(ParakeetLanguage.discoveryCases.count == 26)
+        #expect(ParakeetLanguage.discoveryCases.contains(.auto))
+        #expect(ParakeetLanguage.discoveryCases.contains(.english))
+        for language: ParakeetLanguage in [.bosnian, .belarusian, .serbian] {
+            #expect(!ParakeetLanguage.discoveryCases.contains(language))
+            #expect(ParakeetLanguage.resolved(language.rawValue) == language)
+        }
+    }
 
     @Test("ParakeetLanguage resolves auto and pinned ISO codes")
     func resolvesAutoAndPinned() {

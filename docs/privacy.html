@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Privacy Policy &middot; Muesli</title>
-  <meta name="description" content="Privacy policy for Muesli, a local-first AI dictation and meeting transcription app for macOS.">
+  <title>Privacy Policy &middot; Mimo</title>
+  <meta name="description" content="Privacy policy for Mimo, a local-first AI dictation and meeting transcription app for macOS.">
   <meta name="theme-color" content="#111214">
   <link rel="icon" type="image/png" href="./favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -113,17 +113,17 @@
 <body>
 
 <div class="container">
-  <a href="./" class="back">&larr; freedspeech.xyz</a>
+  <a href="./" class="back">&larr; Mimo</a>
 
   <h1>Privacy Policy</h1>
-  <p class="updated">Last updated: August 28, 2026</p>
+  <p class="updated">Last updated: September 10, 2026</p>
 
   <div class="highlight">
-    <p><strong>Muesli is local-first.</strong> By default, speech-to-text processing runs on your Mac and audio never leaves your device. If you explicitly select an optional hosted dictation provider, Muesli sends that dictation audio to OpenAI or through OpenRouter to your selected upstream model for transcription. We do not operate servers that receive, store, or process your data.</p>
+    <p><strong>Mimo is local-first.</strong> By default, speech-to-text processing runs on your Mac and audio stays on your device. If you explicitly select an optional hosted dictation provider, Mimo sends that dictation audio to OpenAI or through OpenRouter to your selected upstream model for transcription. Optional hosted reasoning and account sync use the services described below.</p>
   </div>
 
-  <h2>What Muesli Does</h2>
-  <p>Muesli is a macOS application for dictation and meeting transcription. It uses on-device machine learning models (CoreML / Apple Neural Engine) to convert speech to text entirely on your Mac by default. Optional OpenAI and OpenRouter dictation providers are available only when you choose and configure them.</p>
+  <h2>What Mimo Does</h2>
+  <p>Mimo is a macOS application for dictation and meeting transcription. It uses on-device machine learning models (CoreML / Apple Neural Engine) to convert speech to text entirely on your Mac by default. Optional OpenAI and OpenRouter dictation providers are available only when you choose and configure them.</p>
 
   <h2>Data That Stays on Your Device</h2>
   <p>The following data is created and stored locally on your Mac. It is not transmitted to any external server unless you explicitly enable an optional cloud service described below:</p>
@@ -135,55 +135,57 @@
   </ul>
 
   <h2>Optional Cloud Services</h2>
-  <p>Muesli offers optional integrations that connect to external services. These are opt-in and require explicit user action:</p>
+  <p>Mimo offers optional integrations that connect to external services. These are opt-in and require explicit user action:</p>
   <ul>
     <li><strong>OpenAI dictation (OpenAI API)</strong> &mdash; if you select OpenAI as your dictation provider and add your own API key, microphone audio is streamed directly to OpenAI's Realtime transcription API. OpenAI's API data controls explain how API data is used, retained, and excluded from model training by default; see <a href="https://platform.openai.com/docs/models/default-usage-policies-by-endpoint">OpenAI's API data-controls documentation</a> for the current retention and data-sharing settings.</li>
     <li><strong>OpenRouter dictation</strong> &mdash; if you select OpenRouter as your dictation provider, connect an account or key, and choose a transcription model, the completed dictation recording is sent through OpenRouter to that selected upstream model. Processing is governed by OpenRouter's and the selected model provider's policies.</li>
     <li><strong>Meeting summarization (OpenAI API / OpenRouter)</strong> &mdash; if configured, meeting transcripts are sent to the selected API provider to generate summaries. This is governed by the respective provider's privacy policy.</li>
-    <li><strong>Meeting summarization (ChatGPT subscription)</strong> &mdash; if you sign in with your ChatGPT account, transcripts are sent to OpenAI's API for summarization using your existing subscription.</li>
-    <li><strong>Sparkle update checks</strong> &mdash; Muesli checks for new versions via an appcast feed hosted on GitHub. No personal data is transmitted.</li>
+    <li><strong>Meeting summaries and questions (ChatGPT sign-in)</strong> &mdash; if you sign in with your ChatGPT account and select it as the reasoning provider, relevant transcripts and review excerpts are sent to OpenAI's ChatGPT/Codex service using models available to that account.</li>
+    <li><strong>Mimo Account sync</strong> &mdash; when available in the build and enabled by signing in, dictation text, meeting transcripts, summaries, manual notes, titles, and related text metadata are sent to the configured Mimo account service to sync across your devices. Audio files, downloaded models, provider credentials, and ChatGPT or Google sign-in tokens are excluded from this sync. Builds without the account service configured keep the library on the Mac.</li>
+    <li><strong>Sparkle update checks</strong> &mdash; Mimo checks for new versions via an appcast feed hosted on GitHub. No personal data is transmitted.</li>
   </ul>
 
   <h2>Google Calendar Integration</h2>
-  <p>Muesli can optionally connect to your Google Calendar to display upcoming meetings in the status bar and auto-detect meeting start times. When you connect Google Calendar:</p>
+  <p>Mimo can optionally connect to your Google Calendar to display upcoming meetings in the status bar and auto-detect meeting start times. When you connect Google Calendar:</p>
   <ul>
-    <li>Muesli requests <strong>read-only access</strong> to your calendar events (event titles, times, and durations)</li>
+    <li>Mimo requests <strong>read-only access</strong> to your calendar events (event titles, times, and durations)</li>
     <li>Calendar data is fetched directly from Google's API to your Mac &mdash; it does not pass through any intermediary server</li>
-    <li>Calendar data is used only for displaying upcoming meetings and is not stored persistently</li>
-    <li>OAuth tokens are stored in your macOS Keychain, protected by the operating system</li>
+    <li>Calendar events are used to display upcoming meetings and associate recordings with events; an event title and reference attached to a meeting can remain in that meeting's local metadata</li>
+    <li>Google OAuth tokens are stored in permission-restricted local files and marked for exclusion from backups</li>
     <li>You can revoke access at any time from your <a href="https://myaccount.google.com/permissions">Google Account permissions</a> page</li>
   </ul>
 
   <h2>macOS Permissions</h2>
-  <p>Muesli requests the following macOS permissions, each for a specific purpose:</p>
+  <p>Mimo requests the following macOS permissions, each for a specific purpose:</p>
   <ul>
     <li><strong>Microphone</strong> &mdash; to capture your voice for dictation and meeting transcription</li>
-    <li><strong>Screen Recording</strong> &mdash; to capture system audio during meetings (via ScreenCaptureKit)</li>
+    <li><strong>System Audio Recording</strong> &mdash; to capture the other side of online meetings; the permission name can include Screen Recording on some macOS versions</li>
     <li><strong>Accessibility</strong> &mdash; to paste transcribed text into other applications</li>
     <li><strong>Input Monitoring</strong> &mdash; to detect the global dictation hotkey</li>
     <li><strong>Calendar</strong> &mdash; to read upcoming events from your local macOS calendar (EventKit)</li>
   </ul>
 
   <h2>Anonymous Usage Analytics</h2>
-  <p>Muesli uses <a href="https://telemetrydeck.com">TelemetryDeck</a> to collect minimal, anonymized usage signals (e.g., which features are used and app launch counts). When Muesli detects a hard failure, it may also send an allowlisted diagnostic category, workflow stage, selected on-device transcription backend/model, app version and build, operating system and device model, and a random incident ID. These diagnostics never include raw error messages, audio, transcripts, meeting or calendar titles, clipboard or screen contents, API keys, auth tokens, local file paths, raw logs, database contents, or other personal content. TelemetryDeck does not store IP addresses, and identifiers used for anonymous user and session counts cannot be traced back to a person. You can learn more about TelemetryDeck's privacy practices on their <a href="https://telemetrydeck.com/privacy">privacy page</a>.</p>
+  <p>Mimo uses <a href="https://telemetrydeck.com">TelemetryDeck</a> to collect minimal, anonymized usage signals (e.g., which features are used and app launch counts). When Mimo detects a hard failure, it may also send an allowlisted diagnostic category, workflow stage, selected on-device transcription backend/model, app version and build, operating system and device model, and a random incident ID. These diagnostics never include raw error messages, audio, transcripts, meeting or calendar titles, clipboard or screen contents, API keys, auth tokens, local file paths, raw logs, database contents, or other personal content. TelemetryDeck does not store IP addresses, and identifiers used for anonymous user and session counts cannot be traced back to a person. You can learn more about TelemetryDeck's privacy practices on their <a href="https://telemetrydeck.com/privacy">privacy page</a>.</p>
 
-  <h2>No Personal Data Collection</h2>
-  <p><strong>Muesli does not collect, transmit, or store personal data on external servers that we operate.</strong> Apart from the anonymous usage signals described above, data remains on your device unless you choose an optional cloud provider such as OpenAI or OpenRouter dictation, hosted cleanup or meeting summaries, or Google Calendar sync. The application remains functional without an internet connection when you use its local features.</p>
+  <h2>Local Storage and Optional Sharing</h2>
+  <p>Meeting content remains local unless you choose a cloud feature described above, such as hosted transcription, hosted reasoning, or Mimo Account sync. Mimo Account sessions use macOS Keychain. ChatGPT and Google session tokens use permission-restricted local files marked for exclusion from backups. These credentials are not part of account sync. Local features work without an internet connection after their models are downloaded; cloud features require a connection.</p>
+  <p>Reviewed meetings hold temporary microphone and system-audio files for the after-meeting transcription. These temporary files are removed after processing or cancellation. The separate recording-save preference controls whether Mimo retains an audio recording in your meeting library.</p>
 
   <h2>Open Source</h2>
-  <p>Muesli's source code is publicly available on <a href="https://github.com/Muesli-HQ/muesli">GitHub</a> under the MIT license. You can inspect exactly what the application does with your data.</p>
+  <p>Mimo's source code is publicly available on <a href="https://github.com/ederntjw/mimo">GitHub</a> under the MIT license. You can inspect exactly what the application does with your data.</p>
 
   <h2>Children's Privacy</h2>
-  <p>Muesli is not directed at children under 13. We do not knowingly collect data from children.</p>
+  <p>Mimo is not directed at children under 13. We do not knowingly collect data from children.</p>
 
   <h2>Changes to This Policy</h2>
-  <p>If this policy changes, the updated version will be posted here with a revised date. Muesli does not have a mechanism to notify users of policy changes since we do not collect contact information.</p>
+  <p>If this policy changes, the updated version will be posted here with a revised date. Mimo does not have a mechanism to notify users of policy changes since we do not collect contact information.</p>
 
   <h2>Contact</h2>
-  <p>For questions about this privacy policy, open an issue on <a href="https://github.com/Muesli-HQ/muesli/issues">GitHub</a> or reach out to the maintainer via the repository.</p>
+  <p>For questions about this privacy policy, open an issue on <a href="https://github.com/ederntjw/mimo/issues">GitHub</a> or reach out to the maintainer via the repository.</p>
 </div>
 
-<footer>muesli &middot; local-first &middot; open source</footer>
+<footer>mimo &middot; local-first &middot; open source</footer>
 
 </body>
 </html>

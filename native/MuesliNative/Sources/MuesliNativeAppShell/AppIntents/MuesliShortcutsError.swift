@@ -8,9 +8,9 @@ enum MuesliShortcutsError: Swift.Error, CustomLocalizedStringResourceConvertible
 
     var localizedStringResource: LocalizedStringResource {
         switch self {
-        case .noDictations: return "Muesli has no dictations yet."
-        case .noMeetings: return "Muesli has no meetings yet."
-        case .notRunning: return "Muesli isn't running. Open Muesli and try again."
+        case .noDictations: return "Mimo has no dictations yet."
+        case .noMeetings: return "Mimo has no meetings yet."
+        case .notRunning: return "Mimo isn't running. Open Mimo and try again."
         }
     }
 }

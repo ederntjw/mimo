@@ -25,6 +25,29 @@ struct LiveMeetingAssistantMessage: Identifiable, Equatable, Sendable {
     }
 }
 
+struct MeetingAssistantConversation: Equatable, Sendable {
+    var messages: [LiveMeetingAssistantMessage] = []
+    var requestID: UUID?
+    var error: String?
+
+    var isAnswering: Bool { requestID != nil }
+}
+
+enum MeetingAssistantTranscriptPolicy {
+    static func transcript(
+        meetingID: Int64,
+        savedTranscript: String,
+        liveOwnerID: Int64?,
+        liveTranscript: String
+    ) -> String {
+        guard liveOwnerID == meetingID else { return savedTranscript }
+        return MeetingResumePolicy.combinedResumeTranscript(
+            prior: savedTranscript,
+            new: liveTranscript
+        )
+    }
+}
+
 enum LiveMeetingSummaryPolicy {
     // Keep the first checkpoint visibly live. The delay starts only after a
     // committed speech chunk arrives, so larger values make short meetings
@@ -63,14 +86,37 @@ struct LiveMeetingAssistantSection: View {
         question.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var assistantConversation: MeetingAssistantConversation {
+        appState.meetingAssistantConversations[meetingID] ?? MeetingAssistantConversation()
+    }
+
+    private var isRecording: Bool {
+        controller.meeting(id: meetingID)?.status == .recording
+            && appState.liveMeetingTranscriptOwnerID == meetingID
+    }
+
     private var isLecture: Bool {
         controller.meeting(id: meetingID)?.source == .lecture
     }
 
     var body: some View {
         VStack(spacing: MuesliTheme.spacing12) {
-            liveBrief
-                .frame(minHeight: 150, idealHeight: 220, maxHeight: 280)
+            if isRecording {
+                liveBrief
+                    .frame(minHeight: 150, idealHeight: 220, maxHeight: 280)
+            } else {
+                Label("Ask about this \(isLecture ? "lecture" : "meeting") using its saved transcript.", systemImage: "text.bubble")
+                    .font(MuesliTheme.callout())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let error = assistantConversation.error {
+                Text(error)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.recording)
+                    .textSelection(.enabled)
+            }
 
             conversation
 
@@ -144,7 +190,7 @@ struct LiveMeetingAssistantSection: View {
                 MeetingNotesView(markdown: appState.liveMeetingSummary)
             }
 
-            if let error = appState.liveMeetingAssistantError, !error.isEmpty {
+            if let error = appState.liveMeetingSummaryError, !error.isEmpty {
                 Text(error)
                     .font(MuesliTheme.caption())
                     .foregroundStyle(MuesliTheme.recording)
@@ -166,7 +212,7 @@ struct LiveMeetingAssistantSection: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
-                    if appState.liveMeetingAssistantMessages.isEmpty {
+                    if assistantConversation.messages.isEmpty {
                         VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
                             HStack(spacing: MuesliTheme.spacing8) {
                                 Image(systemName: "bubble.left.and.bubble.right.fill")
@@ -185,11 +231,11 @@ struct LiveMeetingAssistantSection: View {
                         .padding(.top, MuesliTheme.spacing8)
                     }
 
-                    ForEach(appState.liveMeetingAssistantMessages) { message in
+                    ForEach(assistantConversation.messages) { message in
                         messageBubble(message)
                     }
 
-                    if appState.isLiveMeetingAssistantAnswering {
+                    if assistantConversation.isAnswering {
                         HStack(spacing: MuesliTheme.spacing8) {
                             ProgressView()
                                 .controlSize(.small)
@@ -210,10 +256,10 @@ struct LiveMeetingAssistantSection: View {
                 .padding(.horizontal, MuesliTheme.spacing24)
                 .padding(.vertical, MuesliTheme.spacing16)
             }
-            .onChange(of: appState.liveMeetingAssistantMessages.count) { _, _ in
+            .onChange(of: assistantConversation.messages.count) { _, _ in
                 scrollToBottom(proxy)
             }
-            .onChange(of: appState.isLiveMeetingAssistantAnswering) { _, _ in
+            .onChange(of: assistantConversation.isAnswering) { _, _ in
                 scrollToBottom(proxy)
             }
         }
@@ -228,7 +274,7 @@ struct LiveMeetingAssistantSection: View {
 
     private var composer: some View {
         HStack(alignment: .center, spacing: MuesliTheme.spacing8) {
-            TextField(isLecture ? "Ask Mimo about the lecture so far…" : "Ask Mimo about what has already been said…", text: $question)
+            TextField(isLecture ? "Ask Mimo about this lecture…" : "Ask Mimo about this meeting…", text: $question)
                 .textFieldStyle(.plain)
                 .focused($questionFieldFocused)
                 .onSubmit(submitQuestion)
@@ -242,8 +288,8 @@ struct LiveMeetingAssistantSection: View {
                     .clipShape(Circle())
             }
             .buttonStyle(.plain)
-            .disabled(trimmedQuestion.isEmpty || appState.isLiveMeetingAssistantAnswering)
-            .help(isLecture ? "Ask about the lecture so far" : "Ask about the meeting so far")
+            .disabled(trimmedQuestion.isEmpty || assistantConversation.isAnswering)
+            .help(isLecture ? "Ask about this lecture" : "Ask about this meeting")
         }
         .padding(.horizontal, MuesliTheme.spacing12)
         .frame(height: 44)
@@ -300,7 +346,7 @@ struct LiveMeetingAssistantSection: View {
 
     private func submitQuestion() {
         let submitted = trimmedQuestion
-        guard !submitted.isEmpty, !appState.isLiveMeetingAssistantAnswering else { return }
+        guard !submitted.isEmpty, !assistantConversation.isAnswering else { return }
         question = ""
         controller.askLiveMeetingAssistant(question: submitted, meetingID: meetingID)
         questionFieldFocused = true

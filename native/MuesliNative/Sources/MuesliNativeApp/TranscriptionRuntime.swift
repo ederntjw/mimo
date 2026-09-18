@@ -1356,6 +1356,13 @@ actor TranscriptionCoordinator {
         return SpeechTranscriptionResult(text: correctedText, segments: result.segments)
     }
 
+    // Swift 6.4's CopyPropagation pass reports an invalid BackendOption lifetime
+    // after inlining this async dispatcher into import and meeting callers.
+    // Keep inference optimized in the backend implementations.
+    #if compiler(>=6.4) && compiler(<6.5)
+    @_optimize(none)
+    @inline(never)
+    #endif
     private func route(
         url: URL,
         backend: BackendOption,

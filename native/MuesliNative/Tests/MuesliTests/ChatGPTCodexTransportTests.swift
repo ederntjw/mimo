@@ -4,6 +4,30 @@ import Testing
 
 @Suite("ChatGPT Responses transport")
 struct ChatGPTResponsesTransportTests {
+    @Test("Quill output budgets are omitted only on the Codex transport")
+    func quillOutputBudgetCompatibility() throws {
+        let body = ChatGPTResponsesClient.requestBody(
+            systemPrompt: "Rewrite the text", userPrompt: "Hello", model: "gpt-5.6-luna",
+            maxOutputTokens: QuilModelPolicy.remoteMaximumOutputTokens
+        )
+        for backend in ["codex", "wham"] {
+            let request = try ChatGPTResponsesTransport.makeRequest(
+                body: body, token: "test-token", accountId: "test-account",
+                environment: [ChatGPTResponsesTransport.environmentKey: backend]
+            )
+            let data = try #require(request.httpBody)
+            let payload = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            if backend == "codex" {
+                #expect(payload["max_output_tokens"] == nil)
+            } else {
+                #expect(payload["max_output_tokens"] as? Int == QuilModelPolicy.remoteMaximumOutputTokens)
+            }
+            #expect(payload["instructions"] as? String == "Rewrite the text")
+            #expect(payload["stream"] as? Bool == true)
+            #expect(payload["store"] as? Bool == false)
+        }
+    }
+
     @Test("catalog compatibility is independent of Mimo's honest client identity")
     func modelsRequest() {
         let request = ChatGPTResponsesTransport.makeModelsRequest(

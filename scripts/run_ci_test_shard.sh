@@ -113,6 +113,7 @@ case "${shard}" in
       MeetingTranscriptReviewTests
       MeetingFinalTranscriptionTests
       MeetingTranscriptionPlanTests
+      MeetingRetranscriptionTests
       MeetingsNavigationTests
       MeetingBrowserLogicTests
       MeetingNotesInlineMarkdownTests

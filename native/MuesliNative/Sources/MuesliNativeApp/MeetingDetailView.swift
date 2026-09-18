@@ -4,6 +4,7 @@ import MuesliCore
 private enum MeetingDocumentMode: Hashable {
     case notes
     case transcript
+    case assistant
 }
 
 private enum RecordingContentMode: Hashable {
@@ -94,7 +95,7 @@ struct MeetingDetailView: View {
     let backLabel: String
     @Environment(\.usesCompactQuickNotes) private var usesCompactQuickNotes
     @State private var isSummarizing = false
-    @State private var isRetranscribing = false
+    @State private var retranscriptionMeeting: MeetingRecord?
     @State private var isEditingNotes = false
     @State private var isEditingTranscript = false
     @State private var editableTitle: String
@@ -148,6 +149,11 @@ struct MeetingDetailView: View {
         )
     }
 
+    private var isRetranscribing: Bool {
+        guard let meetingID = meeting?.id else { return false }
+        return appState.retranscribingMeetingID == meetingID
+    }
+
     var body: some View {
         Group {
             if let meeting {
@@ -166,8 +172,11 @@ struct MeetingDetailView: View {
                 .onChange(of: meeting.id) { _, _ in
                     syncLocalState(with: meeting)
                 }
-                .onChange(of: meeting.status) { _, _ in
+                .onChange(of: meeting.status) { oldStatus, newStatus in
                     syncLocalState(with: meeting)
+                    if oldStatus == .recording, newStatus != .recording, recordingMode == .assistant {
+                        documentMode = .assistant
+                    }
                 }
                 .onChange(of: appState.meetingNotesFocusRequest) { _, _ in
                     recordingMode = .notes
@@ -197,6 +206,24 @@ struct MeetingDetailView: View {
             }
         } message: {
             Text(summaryErrorMessage ?? "The updated meeting notes could not be saved.")
+        }
+        .sheet(item: $retranscriptionMeeting) { selectedMeeting in
+            MeetingRetranscriptionSheet(
+                downloadedModels: BackendOption.downloadedMeetingTranscription,
+                configuredModel: appState.config.meetingFinalPassEnabled
+                    ? appState.config.resolvedMeetingFinalBackend
+                    : appState.selectedMeetingTranscriptionBackend,
+                isBlocked: controller.isRetranscriptionBlocked,
+                onCancel: { retranscriptionMeeting = nil },
+                onManageModels: {
+                    retranscriptionMeeting = nil
+                    controller.showModels(category: .dictation)
+                },
+                onRetranscribe: { backend in
+                    retranscriptionMeeting = nil
+                    startRetranscription(for: selectedMeeting, using: backend)
+                }
+            )
         }
         .alert("Couldn't Re-transcribe Meeting", isPresented: retranscriptionErrorBinding) {
             Button("OK", role: .cancel) {
@@ -531,14 +558,31 @@ struct MeetingDetailView: View {
     private func detailModePicker(for meeting: MeetingRecord) -> some View {
         if meeting.status == .recording, showsManualNotesEditor(for: meeting) {
             recordingModePicker
-        } else if !showsManualNotesEditor(for: meeting) {
-            documentModePicker
+        } else if meeting.status != .noteOnly {
+            documentModePicker(for: meeting)
         }
     }
 
     @ViewBuilder
     private func content(for meeting: MeetingRecord) -> some View {
-        if showsManualNotesEditor(for: meeting) {
+        if meeting.status != .recording, documentMode == .assistant {
+            VStack(spacing: 0) {
+                HStack {
+                    Spacer()
+                    retranscribeAction(for: meeting)
+                }
+                .padding(.horizontal, MuesliTheme.spacing16)
+                .padding(.top, MuesliTheme.spacing8)
+                LiveMeetingAssistantSection(
+                    appState: appState,
+                    meetingID: meeting.id,
+                    controller: controller,
+                    isActive: true
+                )
+                .id(meeting.id)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else if showsManualNotesEditor(for: meeting) {
             if meeting.status == .recording {
                 let isManualNotesEditable = canEditManualNotes(for: meeting)
                 let persistedNotes = Self.notesContent(for: meeting)
@@ -694,14 +738,17 @@ struct MeetingDetailView: View {
         }
     }
 
-    private var documentModePicker: some View {
+    private func documentModePicker(for meeting: MeetingRecord) -> some View {
         Picker("", selection: $documentMode) {
             Text("Notes").tag(MeetingDocumentMode.notes)
-            Text("Transcript").tag(MeetingDocumentMode.transcript)
+            if !showsManualNotesEditor(for: meeting) {
+                Text("Transcript").tag(MeetingDocumentMode.transcript)
+            }
+            Text("Ask Mimo").tag(MeetingDocumentMode.assistant)
         }
         .pickerStyle(.segmented)
         .tint(MuesliTheme.accent)
-        .frame(width: 220)
+        .frame(width: usesCompactQuickNotes ? 260 : 320)
         .disabled(isEditingNotes || isEditingTranscript)
     }
 
@@ -788,7 +835,7 @@ struct MeetingDetailView: View {
         ) {
             toggleEditing(for: meeting)
         }
-        .disabled(isRetranscribing && !isEditingNotes && !isEditingTranscript)
+        .disabled(documentMode == .assistant || (isRetranscribing && !isEditingNotes && !isEditingTranscript))
     }
 
     private func toggleEditing(for meeting: MeetingRecord) {
@@ -838,18 +885,19 @@ struct MeetingDetailView: View {
                 }
                 .padding(.horizontal, MuesliTheme.spacing8)
             } else {
-                iconButton("arrow.clockwise", label: "Re-transcribe") {
-                    startRetranscription(for: meeting)
+                iconButton("arrow.clockwise", label: "Re-transcribe…") {
+                    retranscriptionMeeting = meeting
                 }
                 .disabled(meeting.status == .recording || meeting.status == .processing || isEditingNotes || isEditingTranscript)
+                .help("Choose a transcription model for this saved recording")
+                .accessibilityIdentifier("meeting.chooseRetranscriptionModel")
             }
         }
     }
 
-    private func startRetranscription(for meeting: MeetingRecord) {
-        isRetranscribing = true
-        controller.retranscribe(meeting: meeting) { [meeting] result in
-            isRetranscribing = false
+    private func startRetranscription(for meeting: MeetingRecord, using backend: BackendOption) {
+        controller.retranscribe(meeting: meeting, using: backend) { [meeting] result in
+            guard loadedMeetingID == meeting.id else { return }
             switch result {
             case .success:
                 if let updated = controller.meeting(id: meeting.id) {
@@ -1151,7 +1199,16 @@ struct MeetingDetailView: View {
             } label: {
                 Label(editButtonLabel, systemImage: "pencil")
             }
-            .disabled(isRetranscribing)
+            .disabled(isRetranscribing || documentMode == .assistant)
+
+            if meeting.savedRecordingPath != nil {
+                Button {
+                    retranscriptionMeeting = meeting
+                } label: {
+                    Label("Re-transcribe…", systemImage: "arrow.clockwise")
+                }
+                .disabled(meeting.status == .recording || meeting.status == .processing || isEditingNotes || isEditingTranscript)
+            }
 
             if meeting.savedRecordingPath != nil || controller.canDeleteMeeting(meeting) {
                 Divider()
@@ -1619,6 +1676,10 @@ struct MeetingDetailView: View {
             return isEditingNotes ? editableNotes : Self.notesContent(for: meeting)
         case .transcript:
             return isEditingTranscript ? editableTranscript : meeting.rawTranscript
+        case .assistant:
+            return (appState.meetingAssistantConversations[meeting.id]?.messages ?? [])
+                .map { "\($0.role == .user ? "You" : "Mimo"): \($0.text)" }
+                .joined(separator: "\n\n")
         }
     }
 

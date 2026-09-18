@@ -16,3 +16,24 @@ struct MeetingTranscriptionPlan: Equatable {
         ([liveBackend] + (finalBackend.map { [$0] } ?? [])).filter { !available.contains($0) }
     }
 }
+
+enum MeetingRetranscriptionPolicy {
+    /// Keep the full-recording choices visible even when they need downloading.
+    static func modelChoices(downloaded: [BackendOption]) -> [BackendOption] {
+        (MeetingTranscriptionPlan.finalModels + downloaded.filter(\.supportsMeetingTranscription))
+            .reduce(into: []) { choices, option in
+                if !choices.contains(option) { choices.append(option) }
+            }
+    }
+
+    static func resolveModel(
+        requested: BackendOption?,
+        configured: BackendOption,
+        downloaded: [BackendOption]
+    ) -> BackendOption? {
+        let selected = requested ?? configured
+        // An explicit choice must never silently fall back to another model.
+        guard selected.supportsMeetingTranscription, downloaded.contains(selected) else { return nil }
+        return selected
+    }
+}

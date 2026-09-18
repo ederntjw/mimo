@@ -78,7 +78,13 @@ enum ChatGPTResponsesTransport {
             request.setValue("Mimo/\(appVersion)", forHTTPHeaderField: "User-Agent")
             request.setValue(sessionID.uuidString.lowercased(), forHTTPHeaderField: "session_id")
         }
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        var backendBody = body
+        if backend == .codex {
+            // The ChatGPT Codex endpoint rejects this public Responses API
+            // parameter with HTTP 400. Quill still validates output size locally.
+            backendBody.removeValue(forKey: "max_output_tokens")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: backendBody)
         return request
     }
 

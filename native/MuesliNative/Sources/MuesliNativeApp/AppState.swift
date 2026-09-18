@@ -206,6 +206,8 @@ final class AppState {
     var isMeetingRecordingPaused: Bool = false
     var isMeetingStarting: Bool = false
     var meetingStartStatus: String?
+    var isMeetingProcessing = false
+    var retranscribingMeetingID: Int64?
     var liveMeetingTranscript: String = ""
     var liveMeetingTranscriptOwnerID: Int64? = nil
     /// Provisional streaming tails for the live transcript view, one per
@@ -215,9 +217,9 @@ final class AppState {
     var liveMeetingSummary: String = ""
     var liveMeetingSummaryUpdatedAt: Date?
     var isLiveMeetingSummaryRefreshing: Bool = false
-    var liveMeetingAssistantMessages: [LiveMeetingAssistantMessage] = []
-    var isLiveMeetingAssistantAnswering: Bool = false
-    var liveMeetingAssistantError: String?
+    // Conversations belong to saved meetings, independently of recording ownership.
+    var meetingAssistantConversations: [Int64: MeetingAssistantConversation] = [:]
+    var liveMeetingSummaryError: String?
     var activeMeetingAudioWarning: ActiveMeetingAudioWarning?
     var dictationState: DictationState = .idle
     var isVoiceNoteRecording: Bool = false

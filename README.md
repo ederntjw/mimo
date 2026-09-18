@@ -146,7 +146,7 @@ installation therefore does not need another manual drag to Applications.
 Maintainers publish an update from a clean, CI-passing `main` branch with one tag:
 
 ```bash
-./scripts/publish_mimo_update.sh 0.8.7
+./scripts/publish_mimo_update.sh 0.8.8
 ```
 
 The tag-triggered GitHub workflow builds and signs the native Mac app with

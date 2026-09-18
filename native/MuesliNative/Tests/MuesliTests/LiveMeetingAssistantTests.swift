@@ -127,4 +127,95 @@ struct LiveMeetingAssistantTests {
         #expect(template.prompt.contains(String(repeating: "x", count: 2_000)))
         #expect(!template.prompt.contains(String(repeating: "x", count: 2_001)))
     }
+
+    @Test("saved meeting questions cannot include another meeting's live captions")
+    func savedTranscriptIsolation() {
+        #expect(MeetingAssistantTranscriptPolicy.transcript(
+            meetingID: 10,
+            savedTranscript: "[00:01:00] Alex: Ship on Friday.",
+            liveOwnerID: 20,
+            liveTranscript: "Private discussion from another meeting."
+        ) == "[00:01:00] Alex: Ship on Friday.")
+        #expect(MeetingAssistantTranscriptPolicy.transcript(
+            meetingID: 10, savedTranscript: "Final transcript", liveOwnerID: nil, liveTranscript: "Stale captions"
+        ) == "Final transcript")
+    }
+
+    @Test("a resumed meeting can answer from both saved and current speech")
+    func resumedTranscriptContext() {
+        let transcript = MeetingAssistantTranscriptPolicy.transcript(
+            meetingID: 10, savedTranscript: "Prior discussion", liveOwnerID: 10, liveTranscript: "New discussion"
+        )
+        #expect(transcript.contains("Prior discussion"))
+        #expect(transcript.contains("New discussion"))
+    }
+
+    @Test("completed meeting prompts include follow-up context without claiming to record")
+    func completedFollowUpPrompt() {
+        let prompt = MeetingSummaryClient.liveQuestionTemplate(
+            question: "Who owns that?",
+            history: [
+                LiveMeetingAssistantMessage(role: .user, text: "What is the next step?"),
+                LiveMeetingAssistantMessage(role: .assistant, text: "Prepare the launch checklist.")
+            ],
+            isOngoing: false
+        ).prompt
+        #expect(prompt.contains("The session has ended"))
+        #expect(!prompt.contains("The session is ongoing"))
+        #expect(prompt.contains("User: What is the next step?"))
+        #expect(prompt.contains("Assistant: Prepare the launch checklist."))
+        #expect(prompt.contains("User question: Who owns that?"))
+        #expect(prompt.contains("previous answers are not evidence"))
+    }
+
+    @Test("follow-up context is bounded to recent turns and message length")
+    func boundedHistory() {
+        let history = [LiveMeetingAssistantMessage(role: .user, text: "OLD QUESTION")]
+            + (0..<12).map { LiveMeetingAssistantMessage(role: .assistant, text: "Turn \($0) " + String(repeating: "z", count: 3_000)) }
+        let prompt = MeetingSummaryClient.liveQuestionTemplate(question: "Continue", history: history).prompt
+        #expect(!prompt.contains("OLD QUESTION"))
+        #expect(prompt.contains("Turn 11"))
+        #expect(!prompt.contains(String(repeating: "z", count: 2_001)))
+        #expect(prompt.count < 26_000)
+    }
+
+    @MainActor
+    @Test("completed meetings accept questions independently of the active recording")
+    func completedMeetingAcceptsQuestions() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("meeting-assistant-\(UUID())")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let store = DictationStore(databaseURL: directory.appendingPathComponent("test.db"))
+        try store.migrateIfNeeded()
+        let meetingID = try store.insertMeeting(
+            title: "Finished meeting", calendarEventID: nil, startTime: Date(), endTime: Date(),
+            rawTranscript: "", formattedNotes: "", micAudioPath: nil, systemAudioPath: nil
+        )
+        let controller = MuesliController(
+            runtime: RuntimePaths(repoRoot: directory, menuIcon: nil, appIcon: nil, bundlePath: nil),
+            dictationStore: store, configStore: ConfigStore(supportDirectory: directory)
+        )
+        let otherMeetingID = meetingID + 1
+        let existingQuestion = LiveMeetingAssistantMessage(role: .user, text: "Live question")
+        controller.appState.liveMeetingTranscriptOwnerID = otherMeetingID
+        controller.appState.liveMeetingTranscript = "Another meeting is still recording."
+        controller.appState.isMeetingRecording = true
+        controller.appState.meetingAssistantConversations[otherMeetingID] = MeetingAssistantConversation(
+            messages: [existingQuestion], requestID: UUID()
+        )
+
+        controller.askLiveMeetingAssistant(question: "What was decided?", meetingID: meetingID)
+
+        let conversation = try #require(controller.appState.meetingAssistantConversations[meetingID])
+        #expect(conversation.messages.count == 2)
+        #expect(conversation.messages.first?.text == "What was decided?")
+        #expect(conversation.messages.last?.text.contains("does not have a saved transcript") == true)
+        #expect(!conversation.isAnswering)
+        #expect(controller.appState.meetingAssistantConversations[otherMeetingID]?.messages == [existingQuestion])
+        #expect(controller.appState.meetingAssistantConversations[otherMeetingID]?.isAnswering == true)
+        #expect(controller.appState.isMeetingRecording)
+        #expect(controller.appState.liveMeetingTranscriptOwnerID == otherMeetingID)
+        #expect(controller.appState.liveMeetingTranscript == "Another meeting is still recording.")
+    }
+
 }

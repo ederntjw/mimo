@@ -243,7 +243,7 @@ struct SettingsView: View {
     init(appState: AppState, controller: MuesliController) {
         self.appState = appState
         self.controller = controller
-        _selectedPane = State(initialValue: appState.selectedSettingsPane)
+        _selectedPane = State(initialValue: appState.config.usesSimpleBilingualSetup && appState.selectedSettingsPane == .computerUse ? .general : appState.selectedSettingsPane)
     }
 
     // Uniform width for standard right-side controls.
@@ -543,18 +543,21 @@ struct SettingsView: View {
         }
         .onChange(of: appState.selectedTab) { _, tab in
             if tab == .settings {
-                selectedPane = appState.selectedSettingsPane
+                selectedPane = resolvedSettingsPane(appState.selectedSettingsPane)
                 refreshDownloadedModelOptions()
                 refreshAudioInputDevices()
                 refreshPermissionStatuses(for: .settingsSelected)
             }
         }
         .onChange(of: appState.selectedSettingsPane) { _, pane in
-            selectedPane = pane
+            selectedPane = resolvedSettingsPane(pane)
+        }
+        .onChange(of: appState.config.usesSimpleBilingualSetup) { _, _ in
+            selectedPane = resolvedSettingsPane(selectedPane)
         }
         .onChange(of: selectedPane) { _, pane in
             appState.selectedSettingsPane = pane
-            if pane == .dictation || pane == .meetings {
+            if pane == .general || pane == .dictation || pane == .meetings {
                 loadCachedAudioInputDevices()
             }
             scrollToFeatureTourTarget(activeFeatureTourTarget, using: scrollProxy)
@@ -739,7 +742,9 @@ struct SettingsView: View {
         if !screenRecordingGranted {
             return "Grant Screen Recording to add frontmost-window OCR text."
         }
-        return "Adds frontmost-window OCR text. Cloud cleanup may send this text to the selected provider."
+        return appState.config.usesSimpleBilingualSetup
+            ? "Reads text in the frontmost window. Cleanup may send this text to ChatGPT."
+            : "Adds frontmost-window OCR text. Cloud cleanup may send this text to the selected provider."
     }
 
     @ViewBuilder
@@ -801,36 +806,365 @@ struct SettingsView: View {
     private let customIndicatorPositionLabel = "Custom (drag to reposition)"
 
     private var settingsPanePicker: some View {
-        HStack {
-            Spacer()
-            Picker("", selection: $selectedPane) {
-                ForEach(SettingsPane.allCases) { pane in
-                    Text(pane.title).tag(pane)
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                Spacer(minLength: 0)
+                Picker("Settings section", selection: $selectedPane) {
+                    ForEach(availableSettingsPanes) { pane in
+                        Text(settingsPaneTitle(pane)).tag(pane)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: appState.config.usesSimpleBilingualSetup ? 570 : 760)
+                Spacer(minLength: 0)
+            }
+
+            Picker("Settings section", selection: $selectedPane) {
+                ForEach(availableSettingsPanes) { pane in
+                    Text(settingsPaneTitle(pane)).tag(pane)
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(width: 760)
-            Spacer()
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+
+    private var availableSettingsPanes: [SettingsPane] {
+        appState.config.usesSimpleBilingualSetup
+            ? [.general, .dictation, .meetings, .sync, .appearance]
+            : SettingsPane.allCases
+    }
+
+    private func settingsPaneTitle(_ pane: SettingsPane) -> String {
+        appState.config.usesSimpleBilingualSetup && pane == .sync ? "Privacy" : pane.title
+    }
+
+    private func resolvedSettingsPane(_ pane: SettingsPane) -> SettingsPane {
+        appState.config.usesSimpleBilingualSetup && pane == .computerUse ? .general : pane
     }
 
     @ViewBuilder
     private var paneContent: some View {
-        switch selectedPane {
-        case .general:
-            generalSettingsPane
-        case .sync:
-            syncSettingsPane
-        case .dictation:
-            dictationSettingsPane
-        case .computerUse:
-            computerUseSettingsPane
-        case .meetings:
-            meetingsSettingsPane
-        case .appearance:
-            appearanceSettingsPane
+        if appState.config.usesSimpleBilingualSetup {
+            switch resolvedSettingsPane(selectedPane) {
+            case .general, .computerUse: simpleGeneralSettingsPane
+            case .dictation: simpleDictationSettingsPane
+            case .meetings: simpleMeetingsSettingsPane
+            case .sync: simplePrivacySettingsPane
+            case .appearance: simpleAppearanceSettingsPane
+            }
+        } else {
+            switch selectedPane {
+            case .general: generalSettingsPane
+            case .sync: syncSettingsPane
+            case .dictation: dictationSettingsPane
+            case .computerUse: computerUseSettingsPane
+            case .meetings: meetingsSettingsPane
+            case .appearance: appearanceSettingsPane
+            }
         }
+    }
+
+    private var simpleGeneralSettingsPane: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
+            settingsSection("Your voice") {
+                simpleSettingsRow("Keyboard shortcut", detail: "Hold \(appState.config.dictationHotkey.label) to speak. Release to insert your words.") {
+                    compactActionButton("Edit shortcuts", systemImage: "keyboard") {
+                        appState.selectedTab = .shortcuts
+                    }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleSettingsRow("Microphone", detail: "Automatic uses your system input, or the Mac microphone with AirPods.") {
+                    simpleMicrophoneControl(forMeeting: false)
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleSettingsRow("Languages", detail: "Speak Chinese, English, or switch between them.") {
+                    Text("Detect automatically")
+                        .font(MuesliTheme.callout())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Hands-free dictation", detail: "Double-tap your shortcut to start. Tap again to finish.", isOn: appState.config.enableDoubleTapDictation) { value in
+                    controller.updateConfig { $0.enableDoubleTapDictation = value }
+                }
+            }
+            settingsSection("Everyday use") {
+                simpleToggleRow("Launch at login", isOn: appState.config.launchAtLogin) { value in
+                    controller.setLaunchAtLogin(value)
+                }
+                if appState.launchAtLoginRegistrationState == .requiresApproval {
+                    launchAtLoginApprovalPrompt
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Open app window on launch", isOn: appState.config.openDashboardOnLaunch) { value in
+                    controller.updateConfig { $0.openDashboardOnLaunch = value }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Sound feedback", detail: "Play sounds when recording starts and finishes.", isOn: appState.config.soundEnabled) { value in
+                    controller.updateConfig { $0.soundEnabled = value }
+                }
+            }
+        }
+    }
+
+    private var simpleDictationSettingsPane: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
+            dictationCleanupSettingsSection
+            settingsSection("Personal dictionary") {
+                simpleSettingsRow("Names and vocabulary", detail: "Help Mimo recognize the words you use.") {
+                    compactActionButton("Open dictionary", systemImage: "text.book.closed") {
+                        appState.selectedTab = .dictionary
+                    }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Suggest new words", detail: "After you correct a dictation, suggest words to add. Uses Accessibility to briefly read the focused text field.", isOn: appState.config.enableDictionaryCorrectionPrompts) { value in
+                    handleDictionaryCorrectionPromptsToggle(value)
+                }
+            }
+            settingsSection("While you speak") {
+                simpleToggleRow("Pause media", isOn: appState.config.pauseMediaDuringDictation) { value in
+                    controller.updateConfig { $0.pauseMediaDuringDictation = value }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Mute other audio", isOn: appState.config.muteSystemAudioDuringDictation) { value in
+                    controller.updateConfig { $0.muteSystemAudioDuringDictation = value }
+                }
+            }
+            quilSettingsSection
+            settingsSection("Optional context") {
+                simpleSettingsRow("App context", detail: screenContextDescription(includesScreenOCR: false)) {
+                    screenContextControl(width: 180)
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleSettingsRow("Read text on screen", detail: dictationOCRContextDescription) {
+                    dictationOCRContextControl(width: 180)
+                }
+                settingsDescription("When used for cleanup or rewriting, enabled context is sent to ChatGPT along with your text.")
+            }
+        }
+    }
+
+    private var simpleMeetingsSettingsPane: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
+            settingsSection("Recording") {
+                simpleSettingsRow("Meeting microphone", detail: "Choose the input Mimo uses for your voice.") {
+                    simpleMicrophoneControl(forMeeting: true)
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Show live transcript on hover", detail: "See recent words beside the recording bar.", isOn: appState.config.showMeetingTranscriptOnIndicatorHover) { value in
+                    controller.updateConfig { $0.showMeetingTranscriptOnIndicatorHover = value }
+                }
+                .id(FeatureTourTarget.liveCaptionsSetting.rawValue)
+                .featureTourTarget(.liveCaptionsSetting)
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Auto-record calendar meetings", isOn: appState.config.autoRecordMeetings) { value in
+                    controller.updateConfig { $0.autoRecordMeetings = value }
+                }
+                settingsDescription("Chinese and English are detected automatically. Transcripts keep the languages you speak.")
+            }
+            settingsSection("Notes") {
+                simpleSettingsRow("ChatGPT account", detail: "Your subscription creates notes from the meeting transcript.") {
+                    chatGPTAccountControl()
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleSettingsRow("Note style") {
+                    meetingTemplateMenu(selectionID: appState.config.defaultMeetingTemplateID) { id in
+                        controller.updateDefaultMeetingTemplate(id: id)
+                    }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleSettingsRow("Templates") {
+                    compactActionButton("Manage templates", systemImage: "square.and.pencil") {
+                        controller.showMeetingTemplatesManager()
+                    }
+                }
+                settingsDescription("Speech recognition runs on your Mac. Creating notes sends meeting text to ChatGPT and needs internet access.")
+            }
+            settingsSection("Reminders") {
+                simpleToggleRow("Scheduled meetings", detail: "Show a reminder for calendar meetings with a join link.", isOn: appState.config.showScheduledMeetingNotifications) { value in
+                    controller.updateConfig { $0.showScheduledMeetingNotifications = value }
+                }
+                if appState.config.showScheduledMeetingNotifications {
+                    Divider().background(MuesliTheme.surfaceBorder)
+                    simpleSettingsRow("Remind me") {
+                        settingsMenu(
+                            selection: scheduledMeetingLeadTimeLabel(for: appState.config.scheduledMeetingNotificationLeadTime),
+                            options: ScheduledMeetingNotificationLeadTime.allCases.map(scheduledMeetingLeadTimeLabel(for:))
+                        ) { label in
+                            guard let leadTime = scheduledMeetingLeadTime(for: label) else { return }
+                            controller.updateConfig { $0.scheduledMeetingNotificationLeadTime = leadTime }
+                        }
+                    }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Detected calls", detail: "Offer to record when a meeting app starts a call.", isOn: appState.config.showMeetingDetectionNotification) { value in
+                    controller.updateConfig { $0.showMeetingDetectionNotification = value }
+                }
+            }
+        }
+        .onAppear { refreshMeetingCalendarSourcesIfNeeded() }
+    }
+
+    private var simplePrivacySettingsPane: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
+            settingsSection("Your data") {
+                Text("Speech is transcribed on this Mac. Cleanup, rewrites, and meeting notes use your connected ChatGPT account and send text to ChatGPT.")
+                    .font(MuesliTheme.body())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                simpleSettingsRow("Optional app context", detail: "You control whether nearby app text and screen text are included with cleanup or rewriting.") {
+                    compactActionButton("Review context", systemImage: "text.viewfinder") {
+                        selectedPane = .dictation
+                    }
+                }
+            }
+            settingsSection("Saved recordings") {
+                simpleSettingsRow("Keep meeting audio", detail: "Saved audio lets you play back or re-transcribe a meeting. This does not change saved notes and transcripts.") {
+                    settingsMenu(
+                        selection: recordingSaveLabel(for: appState.config.meetingRecordingSavePolicy),
+                        options: MeetingRecordingSavePolicy.allCases.map(recordingSaveLabel(for:))
+                    ) { label in
+                        guard let policy = recordingSavePolicy(for: label) else { return }
+                        controller.updateConfig { $0.meetingRecordingSavePolicy = policy }
+                    }
+                }
+                if appState.config.meetingRecordingSavePolicy != .never {
+                    Divider().background(MuesliTheme.surfaceBorder)
+                    simpleSettingsRow("Audio format") {
+                        settingsMenu(
+                            selection: appState.config.resolvedMeetingRecordingFileFormat.displayName,
+                            options: MeetingRecordingFileFormat.allCases.map(recordingFileFormatLabel(for:))
+                        ) { label in
+                            guard let format = recordingFileFormat(for: label) else { return }
+                            controller.updateConfig { $0.meetingRecordingFileFormat = format.rawValue }
+                        }
+                    }
+                }
+            }
+            permissionsSection
+            syncSettingsPane
+            settingsSection("Clear history") {
+                simpleSettingsRow("Dictations", detail: "Permanently remove saved dictation text.") {
+                    actionButton("Clear dictations…", role: .destructive) {
+                        pendingDataDestruction = .dictations
+                    }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleSettingsRow("Meetings", detail: "Permanently remove saved meetings, notes, transcripts, and retained audio.") {
+                    actionButton("Clear meetings…", role: .destructive) {
+                        pendingDataDestruction = .meetings
+                    }
+                    .disabled(controller.isMeetingRecording())
+                    .help("Stop the current meeting before clearing history.")
+                }
+            }
+        }
+    }
+
+    private var simpleAppearanceSettingsPane: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
+            settingsSection("Look and feel") {
+                simpleSettingsRow("Theme") {
+                    settingsMenu(selection: MuesliVisualTheme.resolved(appState.config.visualTheme).label, options: MuesliVisualTheme.allCases.map(\.label)) { label in
+                        guard let theme = MuesliVisualTheme.allCases.first(where: { $0.label == label }) else { return }
+                        controller.selectVisualTheme(theme)
+                    }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Dark mode", isOn: appState.config.darkMode) { value in
+                    controller.updateConfig { $0.darkMode = value }
+                }
+            }
+            settingsSection("Recording bar") {
+                simpleToggleRow("Show recording bar", isOn: appState.config.showFloatingIndicator) { value in
+                    controller.updateConfig { $0.showFloatingIndicator = value }
+                    controller.refreshIndicatorVisibility()
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Show keyboard shortcut", isOn: appState.config.showHotkeyOnFloatingIndicator) { value in
+                    controller.updateConfig { $0.showHotkeyOnFloatingIndicator = value }
+                }
+                .disabled(!appState.config.showFloatingIndicator)
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleSettingsRow("Position", detail: "You can also drag the recording bar to place it.") {
+                    let isCustom = appState.config.indicatorAnchor == .custom
+                    let selection = isCustom ? customIndicatorPositionLabel : appState.config.indicatorAnchor.label
+                    let options = (isCustom ? [customIndicatorPositionLabel] : []) + IndicatorAnchor.allCases.filter { $0 != .custom }.map(\.label)
+                    settingsMenu(selection: selection, options: options) { label in
+                        guard let anchor = IndicatorAnchor.allCases.first(where: { $0.label == label }) else { return }
+                        controller.updateConfig { $0.indicatorAnchor = anchor }
+                        controller.refreshIndicatorVisibility()
+                    }
+                }
+            }
+            settingsSection("Menu bar") {
+                simpleToggleRow("Show keyboard shortcut", isOn: appState.config.showHotkeyInMenuBar) { value in
+                    controller.updateConfig { $0.showHotkeyInMenuBar = value }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Show next meeting", isOn: appState.config.showNextMeetingInMenuBar) { value in
+                    controller.updateConfig { $0.showNextMeetingInMenuBar = value }
+                }
+            }
+        }
+    }
+
+    private func simpleMicrophoneControl(forMeeting: Bool) -> some View {
+        let options = forMeeting ? meetingMicrophoneOptions : dictationMicrophoneOptions
+        return FixedWidthPopUp(
+            selection: forMeeting ? selectedMeetingMicrophoneLabel : selectedDictationMicrophoneLabel,
+            options: options.map(\.label),
+            onSelectIndex: { index in
+                guard options.indices.contains(index) else { return }
+                if forMeeting {
+                    controller.selectMeetingInputDeviceUID(options[index].uid)
+                } else {
+                    controller.selectDictationInputDeviceUID(options[index].uid)
+                }
+                loadCachedAudioInputDevices()
+            }
+        )
+        .frame(height: 24)
+    }
+
+    private func simpleToggleRow(_ title: String, detail: String? = nil, isOn: Bool, onChange: @escaping (Bool) -> Void) -> some View {
+        simpleSettingsRow(title, detail: detail) {
+            Toggle(title, isOn: Binding(get: { isOn }, set: onChange))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .tint(MuesliTheme.accent)
+        }
+    }
+
+    private func simpleSettingsRow(_ title: String, detail: String? = nil, @ViewBuilder control: () -> some View) -> some View {
+        let labels = VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+            Text(title)
+                .font(MuesliTheme.body())
+                .foregroundStyle(MuesliTheme.textPrimary)
+            if let detail {
+                Text(detail)
+                    .font(MuesliTheme.caption())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: MuesliTheme.spacing20) {
+                labels
+                    .frame(minWidth: 180, idealWidth: 260, maxWidth: .infinity, alignment: .leading)
+                control()
+                    .frame(width: 200, alignment: .trailing)
+            }
+            .frame(minWidth: 440, minHeight: 40)
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+                labels
+                control()
+                    .frame(maxWidth: 200, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, MuesliTheme.spacing4)
     }
 
     private var generalSettingsPane: some View {
@@ -1245,7 +1579,21 @@ struct SettingsView: View {
             && (syncFlowAction == .syncNow || syncFlowAction == .connectDevice)
     }
 
+    @ViewBuilder
     private var dictationModelSettingsSection: some View {
+        if appState.config.usesSimpleBilingualSetup {
+            settingsSection("Speech") {
+                settingsDescription("Speak Mandarin Chinese, English, or both. Mimo detects the language automatically and transcribes on this Mac.")
+                compactActionButton("Speech & notes setup", systemImage: "waveform") {
+                    controller.showModels(category: .dictation)
+                }
+            }
+        } else {
+            advancedDictationModelSettingsSection
+        }
+    }
+
+    private var advancedDictationModelSettingsSection: some View {
         settingsSection("Speech Recognition") {
             settingsRow("Provider", controlWidth: meetingControlWidth) {
                 settingsMenu(
@@ -1426,7 +1774,39 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
     private var meetingTranscriptionSettingsSection: some View {
+        if appState.config.usesSimpleBilingualSetup {
+            settingsSection("Transcription") {
+                settingsDescription("Mandarin Chinese and English are detected automatically. Your transcript keeps the languages you speak, including when you switch between them.")
+                    .id(FeatureTourTarget.liveCaptionsSetting.rawValue)
+                    .featureTourTarget(.liveCaptionsSetting)
+                settingsRow("Microphone", description: "Only affects Mimo. Changes apply immediately.", controlWidth: meetingControlWidth) {
+                    let options = meetingMicrophoneOptions
+                    FixedWidthPopUp(
+                        selection: selectedMeetingMicrophoneLabel,
+                        options: options.map(\.label),
+                        onSelectIndex: { index in
+                            guard options.indices.contains(index) else { return }
+                            controller.selectMeetingInputDeviceUID(options[index].uid)
+                            loadCachedAudioInputDevices()
+                        }
+                    )
+                    .frame(height: 24)
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                settingsRow("Show transcript on hover", description: "Show recent words beside the recording waveform.", controlWidth: meetingControlWidth) {
+                    settingsSwitch(isOn: appState.config.showMeetingTranscriptOnIndicatorHover) { value in
+                        controller.updateConfig { $0.showMeetingTranscriptOnIndicatorHover = value }
+                    }
+                }
+            }
+        } else {
+            advancedMeetingTranscriptionSettingsSection
+        }
+    }
+
+    private var advancedMeetingTranscriptionSettingsSection: some View {
         settingsSection("Transcription") {
             settingsRow(
                 "Review recording after meeting",
@@ -1653,7 +2033,36 @@ struct SettingsView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    @ViewBuilder
     private var dictationCleanupSettingsSection: some View {
+        if appState.config.usesSimpleBilingualSetup {
+            settingsSection("Clean up your words") {
+                simpleSettingsRow("Cleanup", detail: appState.config.resolvedDictationCleanupStrength.detail) {
+                    settingsMenu(
+                        selection: appState.config.resolvedDictationCleanupStrength.label,
+                        options: DictationCleanupStrength.allCases.map(\.label)
+                    ) { label in
+                        guard let strength = DictationCleanupStrength.allCases.first(where: { $0.label == label }) else { return }
+                        controller.updateConfig { $0.setDictationCleanupStrength(strength) }
+                        controller.preloadExperimentalTranscriptionFeatures()
+                    }
+                }
+                .id(FeatureTourTarget.cloudCleanupSetting.rawValue)
+                .featureTourTarget(.cloudCleanupSetting)
+                if appState.config.resolvedDictationCleanupStrength != .none {
+                    Divider().background(MuesliTheme.surfaceBorder)
+                    simpleSettingsRow("ChatGPT account") {
+                        chatGPTAccountControl(selectMeetingSummaryBackend: false)
+                    }
+                    settingsDescription("Cleanup uses your ChatGPT subscription. Dictated text and any enabled context are sent to ChatGPT; speech recognition runs on this Mac.")
+                }
+            }
+        } else {
+            advancedDictationCleanupSettingsSection
+        }
+    }
+
+    private var advancedDictationCleanupSettingsSection: some View {
         settingsSection("Dictation Cleanup") {
             settingsRow("AI transcript cleanup") {
                 settingsSwitch(isOn: appState.config.enablePostProcessor) { newValue in
@@ -1730,7 +2139,46 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
     private var quilSettingsSection: some View {
+        if appState.config.usesSimpleBilingualSetup {
+            simpleQuilSettingsSection
+        } else {
+            advancedQuilSettingsSection
+        }
+    }
+
+    private var simpleQuilSettingsSection: some View {
+        settingsSection("Rewrite with your voice", icon: QuillIcon.image()) {
+            simpleToggleRow("Enable Quill", detail: "Select text, hold your Quill shortcut, and say how to change it.", isOn: appState.config.enableQuilMode) { value in
+                _ = controller.updateQuilModeEnabled(value)
+            }
+            if appState.config.enableQuilMode {
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleSettingsRow("Keyboard shortcut", detail: appState.config.quilHotkey.label) {
+                    compactActionButton("Edit shortcuts", systemImage: "keyboard") {
+                        appState.selectedTab = .shortcuts
+                    }
+                }
+                Divider().background(MuesliTheme.surfaceBorder)
+                simpleToggleRow("Quill sound feedback", isOn: appState.config.quilSoundEnabled) { value in
+                    controller.updateConfig { $0.quilSoundEnabled = value }
+                }
+            }
+            Divider().background(MuesliTheme.surfaceBorder)
+            simpleSettingsRow("ChatGPT account", detail: "Your selected text and spoken instruction are sent to ChatGPT to create the rewrite.") {
+                if appState.isChatGPTAuthenticated {
+                    compactActionButton("Manage account", systemImage: "person.crop.circle") {
+                        selectedPane = .meetings
+                    }
+                } else {
+                    chatGPTAccountControl(selectMeetingSummaryBackend: false)
+                }
+            }
+        }
+    }
+
+    private var advancedQuilSettingsSection: some View {
         settingsSection("Quill", icon: QuillIcon.image()) {
             settingsRow(
                 "Rewrite selected text",
@@ -1751,6 +2199,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            if !appState.config.usesSimpleBilingualSetup {
             Divider().background(MuesliTheme.surfaceBorder)
             settingsRow(
                 "Model source",
@@ -1803,10 +2252,27 @@ struct SettingsView: View {
             } else {
                 hostedQuilSettings(for: selectedQuilBackend)
             }
+            }
+            if appState.config.usesSimpleBilingualSetup {
+                Divider().background(MuesliTheme.surfaceBorder)
+                settingsRow("ChatGPT account", controlWidth: meetingControlWidth) {
+                    if appState.isChatGPTAuthenticated {
+                        compactActionButton("Manage account", systemImage: "person.crop.circle") {
+                            selectedPane = .meetings
+                        }
+                    } else {
+                        chatGPTAccountControl(selectMeetingSummaryBackend: false)
+                    }
+                }
+            }
             Divider().background(MuesliTheme.surfaceBorder)
             settingsRow(
                 quilConfigurationStatus.isReady ? "Quill is ready" : "Quill needs setup",
-                description: quilConfigurationStatus.message,
+                description: appState.config.usesSimpleBilingualSetup
+                    ? (quilConfigurationStatus.isReady
+                       ? "Ready to rewrite with your connected ChatGPT account."
+                       : "Connect ChatGPT to rewrite selected text or create new text.")
+                    : quilConfigurationStatus.message,
                 controlWidth: meetingControlWidth
             ) {
                 Image(systemName: quilConfigurationStatus.isReady ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
@@ -2106,7 +2572,22 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
     private var meetingSummarySettingsSection: some View {
+        if appState.config.usesSimpleBilingualSetup {
+            settingsSection("Meeting notes") {
+                settingsDescription("Mimo turns your Chinese and English conversations into clear notes using your connected ChatGPT account. No model selection is needed.")
+                settingsRow("ChatGPT account", controlWidth: meetingControlWidth) {
+                    chatGPTAccountControl()
+                }
+                settingsDescription("Meeting text is sent to ChatGPT to write notes. Speech recognition runs on this Mac; creating notes needs an internet connection.")
+            }
+        } else {
+            advancedMeetingSummarySettingsSection
+        }
+    }
+
+    private var advancedMeetingSummarySettingsSection: some View {
         settingsSection("Meeting Summaries") {
             settingsRow("Summary backend", controlWidth: meetingControlWidth) {
                 settingsMenu(
@@ -2335,12 +2816,14 @@ struct SettingsView: View {
                 settingsRow("Account", controlWidth: meetingControlWidth) {
                     chatGPTAccountControl()
                 }
+                if !appState.config.usesSimpleBilingualSetup {
                 Divider().background(MuesliTheme.surfaceBorder)
                 settingsRow("Planner model", controlWidth: meetingControlWidth) {
                     settingsModelMenu(
                         currentModel: appState.config.computerUsePlannerModel,
                         presets: SummaryModelPreset.computerUsePlannerModels
                     ) { val in controller.updateConfig { $0.computerUsePlannerModel = val } }
+                }
                 }
                 Divider().background(MuesliTheme.surfaceBorder)
                 settingsRow("Timeout", controlWidth: meetingControlWidth) {

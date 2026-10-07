@@ -11,6 +11,15 @@ struct SpeechSegment: Sendable {
 struct SpeechTranscriptionResult: Sendable {
     let text: String
     let segments: [SpeechSegment]
+    let originalText: String?
+    let isSnippetExpansion: Bool
+
+    init(text: String, segments: [SpeechSegment], originalText: String? = nil, isSnippetExpansion: Bool = false) {
+        self.text = text
+        self.segments = segments
+        self.originalText = originalText
+        self.isSnippetExpansion = isSnippetExpansion
+    }
 }
 
 actor AppleSpeechUseLifecycle {
@@ -293,6 +302,7 @@ actor TranscriptionCoordinator {
         systemPrompt: String,
         config: AppConfig
     ) async {
+        let systemPrompt = config.dictationCleanupSystemPrompt(configuredPrompt: systemPrompt)
         postProcessorBackend = backend
         postProcessorSystemPrompt = systemPrompt
         postProcessorConfig = config
@@ -917,7 +927,8 @@ actor TranscriptionCoordinator {
         appleSpeechLanguage: String = AppleSpeechLanguageOption.systemIdentifier,
         enablePostProcessor: Bool = false,
         customWords: [[String: Any]] = [],
-        appContext: String? = nil
+        appContext: String? = nil,
+        spokenSnippets: [SpokenSnippet] = []
     ) async throws -> SpeechTranscriptionResult {
         // Qwen3 post-processing is intentionally dictation-only. Meeting transcription should keep raw backend/Parakeet output.
         // Cohere decodes hallucinated text from silence — skip if VAD detects no speech
@@ -944,6 +955,12 @@ actor TranscriptionCoordinator {
             appleSpeechLanguage: appleSpeechLanguage
         )
         result = removeArtifacts(result)
+        let originalText = result.text
+        // Explicit spoken triggers expand locally before AI cleanup. Preserve
+        // the saved text exactly, including line breaks, names, and URLs.
+        if let expansion = SpokenSnippetMatcher.expansion(for: result.text, snippets: spokenSnippets) {
+            return SpeechTranscriptionResult(text: expansion, segments: [], originalText: originalText, isSnippetExpansion: true)
+        }
         if !result.text.isEmpty {
             Qwen3PostProcessorLogging.logVerbose("Dictation raw transcript after artifact cleanup: \(result.text)")
         }
@@ -957,12 +974,12 @@ actor TranscriptionCoordinator {
             enabled: enablePostProcessor,
             postProcessorSnapshot: postProcessorSnapshot,
             appContext: appContext
-        ) ?? removeFillersWithLogging(result)
+        ) ?? (postProcessorSnapshot.config.usesSimpleBilingualSetup ? result : removeFillersWithLogging(result))
         let final = applyCustomWords(result, customWords: customWords)
         if !final.text.isEmpty {
             Qwen3PostProcessorLogging.logVerbose("Dictation final transcript: \(final.text)")
         }
-        return final
+        return SpeechTranscriptionResult(text: final.text, segments: final.segments, originalText: originalText)
     }
 
     func transcribeMeeting(
@@ -1105,7 +1122,9 @@ actor TranscriptionCoordinator {
         postProcessorSnapshot: PostProcessorSnapshot,
         appContext: String? = nil
     ) async -> SpeechTranscriptionResult? {
-        guard enabled else {
+        guard enabled,
+              !postProcessorSnapshot.config.usesSimpleBilingualSetup
+                || postProcessorSnapshot.config.resolvedDictationCleanupStrength != .none else {
             Qwen3PostProcessorLogging.logVerbose("Qwen3 post-processor disabled for dictation")
             return nil
         }

@@ -3,6 +3,28 @@ import Testing
 
 @Suite("OnboardingFlow")
 struct OnboardingFlowTests {
+
+    @Test("simple onboarding always prepares the full bilingual speech model")
+    func simpleOnboardingUsesBilingualBackend() {
+        #expect(OnboardingFlow.initialTranscriptionBackend(
+            requested: .parakeetUnified,
+            usesSimpleBilingualSetup: true
+        ) == .whisperLargeV3)
+        #expect(OnboardingFlow.initialTranscriptionBackend(
+            requested: .whisperSmall,
+            usesSimpleBilingualSetup: true
+        ) == .whisperLargeV3)
+    }
+
+    @Test("legacy onboarding preserves supported model selections")
+    func legacyOnboardingKeepsSelection() {
+        for backend in BackendOption.onboarding {
+            #expect(OnboardingFlow.initialTranscriptionBackend(
+                requested: backend,
+                usesSimpleBilingualSetup: false
+            ) == backend)
+        }
+    }
     @Test("voice notes orders push-to-talk steps without paste permission")
     func voiceNotesOrderedSteps() {
         #expect(OnboardingFlow.orderedSteps(for: .voiceNotes) == [0, 1, 2, 3, 4])

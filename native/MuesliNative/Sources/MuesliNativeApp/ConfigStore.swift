@@ -15,7 +15,18 @@ final class ConfigStore {
 
     func load() -> AppConfig {
         ensureDirectory()
-        guard let data = try? Data(contentsOf: configURL) else {
+        let data: Data
+        do {
+            data = try Data(contentsOf: configURL)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            // Only a new profile adopts the simplified setup. Existing profiles
+            // retain their providers and cloud opt-outs until an explicit switch.
+            var config = AppConfig()
+            config.darkMode = false
+            config.usesSimpleBilingualSetup = true
+            config.applySimpleBilingualSetupIfNeeded()
+            return config
+        } catch {
             return AppConfig()
         }
         var config = (try? decoder.decode(AppConfig.self, from: data)) ?? AppConfig()

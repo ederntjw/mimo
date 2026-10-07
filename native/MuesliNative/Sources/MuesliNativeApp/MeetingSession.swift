@@ -273,7 +273,8 @@ final class MeetingSession {
     ) {
         self.title = title
         self.calendarEventID = calendarEventID
-        backendLock.withLock { $0 = config.meetingFinalPassEnabled ? .senseVoiceSmall : backend }
+        let liveBackend = MeetingTranscriptionPlan(config: config, singlePassBackend: backend).liveBackend
+        backendLock.withLock { $0 = liveBackend }
         self.runtime = runtime
         self.config = config
         self.templateSnapshot = templateSnapshot
@@ -347,7 +348,7 @@ final class MeetingSession {
     }
 
     func updateBackend(_ backend: BackendOption) {
-        let liveBackend = config.meetingFinalPassEnabled ? BackendOption.senseVoiceSmall : backend
+        let liveBackend = MeetingTranscriptionPlan(config: config, singlePassBackend: backend).liveBackend
         guard !config.meetingChineseEnglishBilingual || liveBackend.supportsChineseEnglishMeetingTranscription else { return }
         backendLock.withLock { $0 = liveBackend }
         chunkRotationQueue.async { [weak self] in
@@ -429,7 +430,8 @@ final class MeetingSession {
         return false
     }
 
-    private func currentBackend() -> BackendOption {
+    /// The engine used for live chunks, including the fixed role in reviewed meetings.
+    func currentBackend() -> BackendOption {
         backendLock.withLock { $0 }
     }
 

@@ -36,7 +36,7 @@ public final class DictationStore {
     private static let dictationColumns = """
     d.id, d.timestamp, d.duration_seconds, d.raw_text, d.app_context, d.word_count, d.source,
     d.target_app_name, d.target_app_bundle_id,
-    t.id, t.final_status, t.final_message, t.trace_json, t.created_at
+    t.id, t.final_status, t.final_message, t.trace_json, t.created_at, d.original_text
     """
     private static let meetingColumns = """
     id, title, start_time, duration_seconds, raw_transcript, formatted_notes, word_count, folder_id, calendar_event_id, mic_audio_path, system_audio_path, saved_recording_path, meeting_status, manual_notes, selected_template_id, selected_template_name, selected_template_kind, selected_template_prompt, source, follow_up_to_id, follow_up_to_record_name, calendar_occurrence_key, calendar_source, calendar_id, calendar_series_id, calendar_occurrence_start, visual_context
@@ -68,6 +68,7 @@ public final class DictationStore {
             timestamp TEXT NOT NULL,
             duration_seconds REAL,
             raw_text TEXT,
+            original_text TEXT,
             app_context TEXT,
             word_count INTEGER NOT NULL DEFAULT 0,
             source TEXT NOT NULL DEFAULT 'dictation',
@@ -242,6 +243,7 @@ public final class DictationStore {
             "ALTER TABLE dictations ADD COLUMN sync_dirty INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE dictations ADD COLUMN target_app_name TEXT",
             "ALTER TABLE dictations ADD COLUMN target_app_bundle_id TEXT",
+            "ALTER TABLE dictations ADD COLUMN original_text TEXT",
             "ALTER TABLE meetings ADD COLUMN updated_at REAL NOT NULL DEFAULT 0",
             "ALTER TABLE meetings ADD COLUMN manual_notes_updated_at REAL NOT NULL DEFAULT 0",
             "ALTER TABLE meetings ADD COLUMN deleted_at REAL",
@@ -409,6 +411,7 @@ public final class DictationStore {
     @discardableResult
     public func insertDictation(
         text: String,
+        originalText: String? = nil,
         durationSeconds: Double,
         appContext: String = "",
         source: String = "dictation",
@@ -421,6 +424,7 @@ public final class DictationStore {
         defer { sqlite3_close(db) }
         return try insertDictation(
             text: text,
+            originalText: originalText,
             durationSeconds: durationSeconds,
             appContext: appContext,
             source: source,
@@ -502,6 +506,7 @@ public final class DictationStore {
 
     private func insertDictation(
         text: String,
+        originalText: String? = nil,
         statisticsText: String? = nil,
         durationSeconds: Double,
         appContext: String = "",
@@ -516,8 +521,8 @@ public final class DictationStore {
         let sql = """
         INSERT INTO dictations
         (timestamp, duration_seconds, raw_text, app_context, word_count, source,
-         target_app_name, target_app_bundle_id, started_at, ended_at, updated_at, sync_dirty)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+         target_app_name, target_app_bundle_id, started_at, ended_at, updated_at, sync_dirty, original_text)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
         """
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
@@ -539,6 +544,7 @@ public final class DictationStore {
         sqlite3_bind_text(statement, 9, (started as NSString).utf8String, -1, nil)
         sqlite3_bind_text(statement, 10, (ended as NSString).utf8String, -1, nil)
         sqlite3_bind_double(statement, 11, Date().timeIntervalSince1970)
+        bindOptionalText(originalText, at: 12, statement: statement)
 
         guard sqlite3_step(statement) == SQLITE_DONE else {
             throw lastError(db)
@@ -2344,6 +2350,7 @@ public final class DictationStore {
         let sql = """
         UPDATE dictations
         SET raw_text = '',
+            original_text = NULL,
             app_context = '',
             word_count = 0,
             duration_seconds = 0,
@@ -2428,6 +2435,7 @@ public final class DictationStore {
             """
             UPDATE dictations
             SET raw_text = '',
+                original_text = NULL,
                 app_context = '',
                 word_count = 0,
                 duration_seconds = 0,
@@ -5055,6 +5063,7 @@ public final class DictationStore {
             timestamp = excluded.timestamp,
             duration_seconds = excluded.duration_seconds,
             raw_text = excluded.raw_text,
+            original_text = CASE WHEN excluded.deleted_at IS NOT NULL THEN NULL ELSE dictations.original_text END,
             word_count = excluded.word_count,
             source = excluded.source,
             started_at = excluded.started_at,
@@ -5303,7 +5312,8 @@ public final class DictationStore {
             source: stringColumn(statement, index: 6),
             targetAppName: optionalStringColumn(statement, index: 7),
             targetAppBundleID: optionalStringColumn(statement, index: 8),
-            computerUseTrace: trace
+            computerUseTrace: trace,
+            originalText: optionalStringColumn(statement, index: 14)
         )
     }
 

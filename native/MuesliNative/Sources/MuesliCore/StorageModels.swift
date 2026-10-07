@@ -195,6 +195,8 @@ public struct DictationRecord: Identifiable, Codable, Sendable {
     public let timestamp: String
     public let durationSeconds: Double
     public let rawText: String
+    /// Device-local speech text before cleanup or snippet expansion. Older records have no original.
+    public let originalText: String?
     public let appContext: String
     public let wordCount: Int
     public let source: String
@@ -212,12 +214,14 @@ public struct DictationRecord: Identifiable, Codable, Sendable {
         source: String = "dictation",
         targetAppName: String? = nil,
         targetAppBundleID: String? = nil,
-        computerUseTrace: ComputerUseTraceRecord? = nil
+        computerUseTrace: ComputerUseTraceRecord? = nil,
+        originalText: String? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
         self.durationSeconds = durationSeconds
         self.rawText = rawText
+        self.originalText = originalText
         self.appContext = appContext
         self.wordCount = wordCount
         self.source = source

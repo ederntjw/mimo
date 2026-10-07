@@ -136,13 +136,14 @@ struct OnboardingView: View {
         _currentStep = State(initialValue: effectiveInitialStep)
         _userName = State(initialValue: initialUserName)
         _selectedUseCase = State(initialValue: initialUseCase)
-        let sanitizedInitialBackend = BackendOption.onboarding.contains(initialBackend)
-            ? initialBackend
-            : BackendOption.onboardingDefault
+        let sanitizedInitialBackend = OnboardingFlow.initialTranscriptionBackend(
+            requested: initialBackend,
+            usesSimpleBilingualSetup: appState.config.usesSimpleBilingualSetup
+        )
         _selectedBackend = State(initialValue: sanitizedInitialBackend)
         _selectedCohereLanguage = State(initialValue: initialCohereLanguage)
         _selectedHotkey = State(initialValue: initialHotkey)
-        _summaryBackend = State(initialValue: initialSummaryBackend)
+        _summaryBackend = State(initialValue: appState.config.usesSimpleBilingualSetup ? .chatGPT : initialSummaryBackend)
         _modelDownloadProgress = State(initialValue: initialModelDownloadProgress)
         _modelDownloadStatus = State(initialValue: initialModelDownloadStatus)
         _micGranted = State(initialValue: initialMicGranted)
@@ -672,7 +673,41 @@ struct OnboardingView: View {
 
     // MARK: - Step 2: Model Selection
 
+    @ViewBuilder
     private var modelStep: some View {
+        if appState.config.usesSimpleBilingualSetup {
+            simpleSpeechSetupStep
+        } else {
+            modelSelectionStep
+        }
+    }
+
+    private var simpleSpeechSetupStep: some View {
+        VStack(spacing: MuesliTheme.spacing24) {
+            Spacer()
+            Image(systemName: "waveform")
+                .font(.system(size: 40, weight: .light))
+                .foregroundStyle(MuesliTheme.accent)
+            Text("Chinese & English, ready together")
+                .font(MuesliTheme.title1())
+                .foregroundStyle(MuesliTheme.textPrimary)
+            Text("Speak Mandarin Chinese, English, or switch between them. Mimo detects the language and transcribes on this Mac.")
+                .font(MuesliTheme.body())
+                .foregroundStyle(MuesliTheme.textSecondary)
+            Text("A one-time \(SimpleBilingualSetup.transcriptionBackend.sizeLabel) download prepares speech for dictation and meetings. You can continue setup while it downloads.")
+                .font(MuesliTheme.callout())
+                .foregroundStyle(MuesliTheme.textSecondary)
+            Text("Cleanup, rewrites, and meeting notes use your connected ChatGPT account and send text to ChatGPT. You can connect your account or turn cleanup off in Settings. Speech recognition works offline after setup.")
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.textSecondary)
+            Spacer()
+        }
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, MuesliTheme.spacing32)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var modelSelectionStep: some View {
         VStack(spacing: MuesliTheme.spacing16) {
             VStack(spacing: MuesliTheme.spacing8) {
                 Text("Choose your transcription model")
@@ -1464,12 +1499,15 @@ struct OnboardingView: View {
                     .font(MuesliTheme.title1())
                     .foregroundStyle(MuesliTheme.textPrimary)
 
-                Text("Connect an LLM provider to get AI-powered meeting notes.\nYou can set this up later in Settings.")
+                Text(appState.config.usesSimpleBilingualSetup
+                     ? "Connect ChatGPT to create meeting notes. Meeting text is sent to ChatGPT; speech recognition stays on this Mac. You can set this up later in Settings."
+                     : "Connect an LLM provider to get AI-powered meeting notes.\nYou can set this up later in Settings.")
                     .font(MuesliTheme.body())
                     .foregroundStyle(MuesliTheme.textSecondary)
                     .multilineTextAlignment(.center)
             }
 
+            if !appState.config.usesSimpleBilingualSetup {
             HStack(spacing: 0) {
                 providerTab("ChatGPT", selected: summaryBackend == .chatGPT) {
                     summaryBackend = .chatGPT
@@ -1495,6 +1533,7 @@ struct OnboardingView: View {
                     .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
             )
             .frame(width: 320)
+            }
 
             if summaryBackend == .chatGPT {
                 Text("Use your ChatGPT Plus or Pro subscription.")
@@ -2000,7 +2039,10 @@ struct OnboardingView: View {
     }
 
     private func modelPreparationFailureMessage(for backend: BackendOption) -> String {
-        backend.isDownloaded
+        if appState.config.usesSimpleBilingualSetup {
+            return "Speech setup failed. Retry here or open Speech & notes after setup."
+        }
+        return backend.isDownloaded
             ? "Model setup failed. Restart \(AppIdentity.displayName) or retry from Models."
             : "Download failed. Check your connection and retry."
     }

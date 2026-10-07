@@ -39,7 +39,7 @@ struct DashboardContentLayout<SidebarContent: View, DetailContent: View>: View {
     @ViewBuilder let detail: () -> DetailContent
 
     var body: some View {
-        HSplitView {
+        HStack(spacing: 0) {
             if !usesCompactQuickNotes {
                 sidebar()
             }
@@ -48,7 +48,11 @@ struct DashboardContentLayout<SidebarContent: View, DetailContent: View>: View {
                 .environment(\.usesCompactQuickNotes, usesCompactQuickNotes)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(MuesliTheme.backgroundBase)
+                .clipShape(RoundedRectangle(cornerRadius: usesCompactQuickNotes ? 0 : 20))
+                .padding(.trailing, usesCompactQuickNotes ? 0 : 10)
+                .padding(.vertical, usesCompactQuickNotes ? 0 : 8)
         }
+        .background(MuesliTheme.backgroundDeep)
     }
 }
 
@@ -91,9 +95,9 @@ struct DashboardRootView: View {
             DashboardContentLayout(usesCompactQuickNotes: usesCompactQuickNotes) {
                 sidebarView
                 .frame(
-                    minWidth: sidebarPresentation.isCollapsed ? 68 : 240,
-                    idealWidth: sidebarPresentation.isCollapsed ? 68 : 260,
-                    maxWidth: sidebarPresentation.isCollapsed ? 68 : 300
+                    minWidth: sidebarPresentation.isCollapsed ? 68 : 220,
+                    idealWidth: sidebarPresentation.isCollapsed ? 68 : 232,
+                    maxWidth: sidebarPresentation.isCollapsed ? 68 : 260
                 )
             } detail: {
                 detailContent
@@ -211,6 +215,11 @@ struct DashboardRootView: View {
                 MeetingsView(appState: appState, controller: controller)
             case .dictionary:
                 DictionaryView(appState: appState, controller: controller)
+            case .snippets:
+                SnippetsView(
+                    store: controller.snippetStore,
+                    usesLiveDictation: appState.config.resolvedDictationProvider.usesStreamingBackend(appState.selectedBackend)
+                )
             case .models:
                 ModelsView(appState: appState, controller: controller)
             case .shortcuts:

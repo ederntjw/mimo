@@ -15,3 +15,17 @@ Mimo includes SmolLM2-360M-Instruct by Hugging Face Smol Models Research
 under the Apache License, Version 2.0. The bundled GGUF Q3_K_M quantization
 comes from Unsloth
 (https://huggingface.co/unsloth/SmolLM2-360M-Instruct-GGUF).
+
+Mimo includes the Figtree and EB Garamond variable fonts, distributed under
+the SIL Open Font License, Version 1.1:
+  Figtree: Copyright 2022 The Figtree Project Authors
+    https://github.com/erikdkennedy/figtree
+  EB Garamond: Copyright 2017 The EB Garamond Project Authors
+    https://github.com/octaviopardo/EBGaramond12
+
+The unmodified font binaries were independently obtained from Google Fonts
+at commit 7085eb89a950e85db5b166b7a58d414544b4140c:
+  https://github.com/google/fonts/tree/7085eb89a950e85db5b166b7a58d414544b4140c/ofl/figtree
+  https://github.com/google/fonts/tree/7085eb89a950e85db5b166b7a58d414544b4140c/ofl/ebgaramond
+Full license texts are included in assets/fonts/Figtree-OFL.txt and
+assets/fonts/EBGaramond-OFL.txt alongside the fonts.

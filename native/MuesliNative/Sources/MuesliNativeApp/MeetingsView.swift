@@ -762,7 +762,85 @@ struct MeetingsView: View {
         .fixedSize(horizontal: true, vertical: false)
     }
 
+    @ViewBuilder
     private var liveMeetingStartPanel: some View {
+        if appState.config.usesSimpleBilingualSetup {
+            simpleMeetingStartPanel
+        } else {
+            advancedMeetingStartPanel
+        }
+    }
+
+    private var simpleMeetingStartPanel: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing20) {
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                Text("Capture a conversation")
+                    .font(MuesliTheme.displayTitle(26))
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Record a meeting or lecture. Mimo turns the conversation into clear notes.")
+                    .font(MuesliTheme.body())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Text(appState.isChatGPTAuthenticated
+                 ? "Chinese & English, automatically · ChatGPT connected"
+                 : "Chinese & English, automatically · Connect ChatGPT in Settings for notes")
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: MuesliTheme.spacing12) {
+                    simpleSessionStartButton(isLecture: false)
+                    simpleSessionStartButton(isLecture: true)
+                }
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                    simpleSessionStartButton(isLecture: false, compact: true)
+                    simpleSessionStartButton(isLecture: true, compact: true)
+                }
+            }
+        }
+        .padding(MuesliTheme.spacing24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MuesliTheme.backgroundBase)
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge))
+        .overlay {
+            RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge)
+                .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("meetings.liveMeetingStartPanel")
+    }
+
+    private func simpleSessionStartButton(isLecture: Bool, compact: Bool = false) -> some View {
+        Button {
+            if isLecture {
+                controller.startLiveLectureFromMeetingsView()
+            } else {
+                controller.startLiveMeetingFromMeetingsView()
+            }
+        } label: {
+            Label(isLecture ? "Start lecture" : "Start meeting", systemImage: isLecture ? "graduationcap" : "person.2")
+                .font(MuesliTheme.callout().weight(.medium))
+                .fixedSize()
+                .padding(.horizontal, MuesliTheme.spacing16)
+                .frame(height: 38)
+                .foregroundStyle(isLecture ? MuesliTheme.textPrimary : MuesliTheme.backgroundBase)
+                .background(isLecture ? MuesliTheme.backgroundRaised : MuesliTheme.textPrimary)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .disabled(appState.isMeetingRecording || appState.isMeetingStarting)
+        .help(isLecture ? "Record a lecture and create study notes" : "Record a meeting and create notes")
+        .accessibilityIdentifier(
+            (isLecture ? "meetings.startLiveLectureButton" : "meetings.startLiveMeetingButton")
+                + (compact ? ".compact" : "")
+        )
+    }
+
+    private var advancedMeetingStartPanel: some View {
         let visualTheme = MuesliVisualTheme.resolved(appState.config.visualTheme)
         return VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
             HStack(alignment: .center, spacing: MuesliTheme.spacing16) {
@@ -783,12 +861,12 @@ struct MeetingsView: View {
 
             HStack(spacing: MuesliTheme.spacing8) {
                 liveMeetingCapability(
-                    "Parakeet / Apple Speech",
-                    detail: "on-device",
+                    appState.config.usesSimpleBilingualSetup ? "Chinese & English" : "Parakeet / Apple Speech",
+                    detail: appState.config.usesSimpleBilingualSetup ? "automatic" : "on-device",
                     systemImage: "waveform.and.mic"
                 )
                 liveMeetingCapability(
-                    SummaryModelPreset.chatGPTModelLabel(appState.config.chatGPTModel),
+                    appState.config.usesSimpleBilingualSetup ? "Meeting notes" : SummaryModelPreset.chatGPTModelLabel(appState.config.chatGPTModel),
                     detail: appState.isChatGPTAuthenticated ? "ChatGPT subscription" : "sign in in Settings",
                     systemImage: "sparkles"
                 )

@@ -1,9 +1,89 @@
 import Foundation
 import Testing
+import MuesliCore
 @testable import MuesliNativeApp
 
 @Suite("Meeting transcription plan")
 struct MeetingTranscriptionPlanTests {
+    @Test("subscription cleanup retains bilingual facts at both strengths", .enabled(if: ProcessInfo.processInfo.environment["MIMO_FLOW_CLEANUP_SMOKE"] == "1"))
+    func subscriptionCleanupSmoke() async throws {
+        let data = try Data(contentsOf: AppIdentity.supportDirectoryURL.appendingPathComponent("config.json"))
+        var config = try JSONDecoder().decode(AppConfig.self, from: data)
+        config.usesSimpleBilingualSetup = true
+        config.applySimpleBilingualSetupIfNeeded()
+        let input = "嗯，我们周五发布，预算是5000美元。Please ask Alex to finish testing by Thursday."
+        var outputs: [String: String] = [:]
+        for strength in [DictationCleanupStrength.light, .medium] {
+            config.setDictationCleanupStrength(strength)
+            let result = try await TranscriptCleanupClient.clean(
+                text: input,
+                systemPrompt: config.dictationCleanupSystemPrompt(configuredPrompt: ""),
+                appContext: nil,
+                backend: .hosted(.chatGPT),
+                config: config
+            )
+            #expect(result.cleanedOutput.contains("Alex"))
+            #expect(result.cleanedOutput.lowercased().contains("thursday"))
+            #expect(result.cleanedOutput.contains("发布"))
+            #expect(result.cleanedOutput.replacingOccurrences(of: ",", with: "").contains("5000"))
+            outputs[strength.rawValue] = result.cleanedOutput
+        }
+        if let path = ProcessInfo.processInfo.environment["MIMO_FLOW_CLEANUP_SMOKE_OUTPUT"] {
+            try JSONEncoder().encode(outputs).write(to: URL(fileURLWithPath: path), options: .atomic)
+        }
+    }
+
+    @Test("simple bilingual setup pins the full model in both passes and never requires SenseVoice")
+    func simpleBilingualPlan() {
+        var config = AppConfig()
+        config.usesSimpleBilingualSetup = true
+        config.applySimpleBilingualSetupIfNeeded()
+        let plan = MeetingTranscriptionPlan(config: config, singlePassBackend: .senseVoiceSmall)
+        #expect(plan.liveBackend == .whisperLargeV3)
+        #expect(plan.finalBackend == .whisperLargeV3)
+        #expect(plan.missingModels(from: [.senseVoiceSmall, .whisperLargeTurbo]) == [.whisperLargeV3])
+        #expect(plan.missingModels(from: [.whisperLargeV3]).isEmpty)
+        #expect(!config.meetingLiveStreamingPartialsEnabled)
+    }
+
+    @Test("simple setup normalizes conflicting saved engines and languages without changing personal settings")
+    func simpleBilingualPersistence() throws {
+        let json = #"{"uses_simple_bilingual_setup":true,"stt_backend":"parakeet-unified","stt_model":"obsolete","whisper_language":"en","meeting_transcription_backend":"sensevoice","meeting_final_transcription_model":"tiny","enable_live_streaming_partials":true,"meeting_summary_backend":"ollama","post_processor_backend":"local","enable_post_processor":false,"user_name":"Test User","dark_mode":false}"#
+        let config = try JSONDecoder().decode(AppConfig.self, from: Data(json.utf8))
+        #expect(config.sttBackend == "whisper")
+        #expect(config.sttModel == BackendOption.whisperLargeV3.model)
+        #expect(config.meetingTranscriptionModel == config.sttModel)
+        #expect(config.meetingFinalTranscriptionModel == config.sttModel)
+        #expect(config.resolvedWhisperLanguage == .auto)
+        #expect(config.resolvedMeetingWhisperLanguage == .auto)
+        #expect(config.meetingChineseEnglishBilingual)
+        #expect(config.meetingSummaryBackend == "chatgpt")
+        #expect(config.chatGPTModel == SimpleBilingualSetup.writingModel)
+        #expect(config.postProcessorChatGPTModel == config.chatGPTModel)
+        #expect(config.quilModel == config.chatGPTModel)
+        #expect(!config.enablePostProcessor)
+        #expect(config.userName == "Test User")
+        #expect(!config.darkMode)
+        let restored = try JSONDecoder().decode(AppConfig.self, from: JSONEncoder().encode(config))
+        #expect(restored.usesSimpleBilingualSetup)
+        #expect(restored.sttModel == config.sttModel)
+        #expect(restored.meetingFinalTranscriptionModel == config.meetingFinalTranscriptionModel)
+    }
+
+    @Test("legacy setups retain explicit provider choices until simple setup is enabled")
+    func legacySetupIsUnchanged() {
+        var config = AppConfig()
+        config.sttBackend = BackendOption.senseVoiceSmall.backend
+        config.sttModel = BackendOption.senseVoiceSmall.model
+        config.whisperLanguage = "zh"
+        config.meetingSummaryBackend = "ollama"
+        config.applySimpleBilingualSetupIfNeeded()
+        #expect(!config.usesSimpleBilingualSetup)
+        #expect(config.sttModel == BackendOption.senseVoiceSmall.model)
+        #expect(config.whisperLanguage == "zh")
+        #expect(config.meetingSummaryBackend == "ollama")
+    }
+
     @Test("new meetings use exactly SenseVoice live and full Whisper Large V3 after stopping")
     func defaults() {
         let config = AppConfig()

@@ -125,7 +125,7 @@ enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var previewBackground: Color {
         switch self {
-        case .classic: Color(hex: 0xF0F4FA)
+        case .classic: Color(hex: 0xF4F2EC)
         case .strawberryMilk: Color(hex: 0xFFF0F5)
         case .cherryRibbon, .lavenderDream, .peachSorbet, .mintMacaron, .roseQuartz,
              .neonGrid, .auroraGlass, .solarFlare:
@@ -175,20 +175,20 @@ enum MuesliVisualTheme: String, CaseIterable, Codable, Identifiable, Sendable {
         switch self {
         case .classic:
             MuesliVisualPalette(
-                backgroundDeep: .init(dark: 0x0B0C0E, light: 0xF5F5F7),
-                backgroundBase: .init(dark: 0x161719, light: 0xFFFFFF),
-                backgroundRaised: .init(dark: 0x1C1D20, light: 0xF0F0F2),
-                backgroundHover: .init(dark: 0x232528, light: 0xE8E8EC),
-                surfacePrimary: .init(dark: 0x262830, light: 0xE5E5EA),
-                surfaceSelected: .init(dark: 0x2E3340, light: 0xD6DFFE),
-                surfaceBorder: .init(dark: 0xFFFFFF, light: 0x000000, darkAlpha: 0.07, lightAlpha: 0.08),
-                textPrimary: .init(dark: 0xFFFFFF, light: 0x000000, darkAlpha: 0.92, lightAlpha: 0.88),
-                textSecondary: .init(dark: 0xFFFFFF, light: 0x000000, darkAlpha: 0.62, lightAlpha: 0.55),
-                textTertiary: .init(dark: 0xFFFFFF, light: 0x000000, darkAlpha: 0.40, lightAlpha: 0.33),
+                backgroundDeep: .init(dark: 0x191A18, light: 0xF4F2EC),
+                backgroundBase: .init(dark: 0x222320, light: 0xFFFEFC),
+                backgroundRaised: .init(dark: 0x292A27, light: 0xF8F6F1),
+                backgroundHover: .init(dark: 0x33342F, light: 0xF0EDE5),
+                surfacePrimary: .init(dark: 0x353630, light: 0xECE9E1),
+                surfaceSelected: .init(dark: 0x3D3D36, light: 0xE8E5DC),
+                surfaceBorder: .init(dark: 0xEEEDE4, light: 0x5A584E, darkAlpha: 0.10, lightAlpha: 0.13),
+                textPrimary: .init(dark: 0xF3F2EC, light: 0x252620),
+                textSecondary: .init(dark: 0xC0C1B8, light: 0x5E6057),
+                textTertiary: .init(dark: 0xA0A298, light: 0x73756C),
                 accent: .init(dark: MuesliTheme.defaultAccentDarkHex, light: MuesliTheme.defaultAccentLightHex),
                 recording: .init(dark: 0xEF4444, light: 0xEF4444),
                 transcribing: .init(dark: 0xF59E0B, light: 0xF59E0B),
-                success: .init(dark: 0x34D399, light: 0x34D399),
+                success: .init(dark: 0x34D399, light: 0x16765B),
                 destructive: .init(dark: 0xFF0000, light: 0xFF0000),
                 streak: .init(dark: 0xFF8000, light: 0xFF8000),
                 joinAction: .init(dark: 0x33B887, light: 0x33B887),
@@ -432,6 +432,13 @@ enum MuesliTheme {
     }
     static var accentSubtle: Color { accent.opacity(0.15) }
 
+    /// A quiet teaching surface, separate from the user's recording accent.
+    static var welcomeSurface: Color {
+        visualTheme == .classic
+            ? Color.adaptive(dark: 0x34313D, light: 0xEEE8F4)
+            : accentSubtle
+    }
+
     // MARK: - Semantic
 
     static var recording: Color { palette.recording.color }
@@ -449,9 +456,9 @@ enum MuesliTheme {
     static var navigationBorder: Color { visualTheme == .classic ? Color.clear : accent.opacity(usesCuteStyling ? 0.25 : 0.20) }
     static var navigationShadow: Color { visualTheme == .classic ? Color.clear : accent.opacity(usesCuteStyling ? 0.18 : 0.14) }
 
-    // MARK: - Typography (SF Pro / SF Rounded via .system())
+    // MARK: - Typography
 
-    static func title1() -> Font { themedFont(size: 26, weight: .bold) }
+    static func title1() -> Font { themedFont(size: 24, weight: .semibold) }
     static func title2() -> Font { themedFont(size: 20, weight: .semibold) }
     static func title3() -> Font { themedFont(size: 18, weight: .semibold) }
     static func headline() -> Font { themedFont(size: 15, weight: .semibold) }
@@ -460,8 +467,17 @@ enum MuesliTheme {
     static func caption() -> Font { themedFont(size: 12, weight: .regular) }
     static func captionMedium() -> Font { themedFont(size: 12, weight: .medium) }
 
+    static func displayTitle(_ size: CGFloat = 32) -> Font {
+        visualTheme == .classic
+            ? .custom("EBGaramond-Regular", size: size)
+            : themedFont(size: size, weight: .regular)
+    }
+
     private static func themedFont(size: CGFloat, weight: Font.Weight) -> Font {
-        .system(size: size, weight: weight, design: usesCuteStyling ? .rounded : .default)
+        if visualTheme == .classic {
+            return .custom("Figtree-Regular", size: size).weight(weight)
+        }
+        return .system(size: size, weight: weight, design: usesCuteStyling ? .rounded : .default)
     }
 
     // MARK: - Spacing (4pt grid)

@@ -19,6 +19,14 @@ enum OnboardingFlow {
 
     static let dictationTestStep = Step.dictationTest.rawValue
 
+    static func initialTranscriptionBackend(
+        requested: BackendOption,
+        usesSimpleBilingualSetup: Bool
+    ) -> BackendOption {
+        if usesSimpleBilingualSetup { return SimpleBilingualSetup.transcriptionBackend }
+        return BackendOption.onboarding.contains(requested) ? requested : BackendOption.onboardingDefault
+    }
+
     static func shouldStartDictationTestMonitor(
         currentStep: Int,
         dictationTestStep: Int,

@@ -66,7 +66,123 @@ struct ModelsView: View {
         _showExperimental = State(initialValue: appState.activeFeatureTourTarget == .experimentalModels)
     }
 
+    @ViewBuilder
     var body: some View {
+        if appState.config.usesSimpleBilingualSetup {
+            simpleSetupView
+        } else {
+            advancedModelLibrary
+        }
+    }
+
+    private var simpleSpeechReady: Bool {
+        SimpleBilingualSetup.transcriptionBackend.isDownloaded
+    }
+
+    private var simplePreparationInProgress: Bool {
+        !appState.modelPreparationIsComplete
+            && (appState.isModelPreparingAfterDownload || appState.modelPreparationProgress != nil)
+    }
+
+    private var simplePreparationFailed: Bool {
+        appState.modelPreparationTitle != nil && !appState.modelPreparationIsComplete && !simplePreparationInProgress
+    }
+
+    private var simpleSetupView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
+                PageTitle("Speech & notes")
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                    Text("Two languages. One setup.")
+                        .font(MuesliTheme.displayTitle())
+                        .foregroundStyle(MuesliTheme.textPrimary)
+                    Text("Speak Mandarin Chinese, English, or switch between them. Mimo takes care of the rest.")
+                        .font(MuesliTheme.body())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
+                    Label("Chinese & English", systemImage: "waveform")
+                        .font(MuesliTheme.headline())
+                    Text("Language is detected automatically for dictation and meetings. Speech recognition runs on this Mac and works offline once prepared.")
+                        .font(MuesliTheme.body())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if simplePreparationInProgress {
+                        ProgressView(value: appState.modelPreparationProgress)
+                        Text("Preparing speech on this Mac…")
+                            .font(MuesliTheme.caption())
+                            .foregroundStyle(MuesliTheme.textSecondary)
+                    } else if simplePreparationFailed {
+                        Label("Setup paused. Check your connection and try again.", systemImage: "exclamationmark.circle")
+                            .font(MuesliTheme.callout())
+                            .foregroundStyle(MuesliTheme.textSecondary)
+                    } else if simpleSpeechReady {
+                        Label("Ready on this Mac", systemImage: "checkmark.circle.fill")
+                            .font(MuesliTheme.callout())
+                            .foregroundStyle(MuesliTheme.success)
+                    } else {
+                        Text("A one-time download is needed before your first recording.")
+                            .font(MuesliTheme.callout())
+                            .foregroundStyle(MuesliTheme.textSecondary)
+                    }
+                    if !simpleSpeechReady || simplePreparationFailed || simplePreparationInProgress {
+                        Button(simplePreparationFailed ? "Retry setup" : "Prepare speech") {
+                            controller.continueModelPreparationAfterOnboarding(
+                                SimpleBilingualSetup.transcriptionBackend,
+                                onboardingUseCase: .dictation,
+                                initialProgress: nil,
+                                initialStatus: nil,
+                                isPreparing: true
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(simplePreparationInProgress || appState.dictationState != .idle
+                                  || appState.isMeetingRecording || appState.isMeetingStarting)
+                    }
+                }
+                .padding(MuesliTheme.spacing24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(MuesliTheme.backgroundRaised)
+                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge))
+                .id(FeatureTourTarget.modelLibrary.rawValue)
+                .featureTourTarget(.modelLibrary)
+
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing16) {
+                    Label("Thoughtful notes, automatically", systemImage: "text.document")
+                        .font(MuesliTheme.headline())
+                    Text("Your connected ChatGPT account turns meeting text into clear notes and can polish your dictation. No model choices to manage.")
+                        .font(MuesliTheme.body())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Label(appState.isChatGPTAuthenticated ? "ChatGPT connected" : "Connect ChatGPT to create notes",
+                          systemImage: appState.isChatGPTAuthenticated ? "checkmark.circle.fill" : "person.crop.circle")
+                        .font(MuesliTheme.callout())
+                        .foregroundStyle(appState.isChatGPTAuthenticated ? MuesliTheme.success : MuesliTheme.textSecondary)
+                    Button(appState.isChatGPTAuthenticated ? "Manage account" : "Connect ChatGPT") {
+                        appState.selectedSettingsPane = .meetings
+                        controller.openSettingsTab()
+                    }
+                    .buttonStyle(.bordered)
+                    Text("Creating notes needs internet access and sends meeting text to ChatGPT. Speech recognition stays on your Mac.")
+                        .font(MuesliTheme.caption())
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(MuesliTheme.spacing24)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(MuesliTheme.backgroundRaised)
+                .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge))
+            }
+            .frame(maxWidth: 720, alignment: .leading)
+            .padding(MuesliTheme.spacing32)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(MuesliTheme.backgroundBase)
+    }
+
+    private var advancedModelLibrary: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: MuesliTheme.spacing24) {
@@ -77,6 +193,8 @@ struct ModelsView: View {
                     Text("Choose the transcription and cleanup models that fit how you speak and work.")
                         .font(MuesliTheme.body())
                         .foregroundStyle(MuesliTheme.textSecondary)
+
+                    simpleSetupInvitation
 
                     thisMacHardwareSummary
 
@@ -168,6 +286,42 @@ struct ModelsView: View {
         } message: {
             Text("Live meetings will fall back to standard chunk-by-chunk captions until this model is downloaded again.")
         }
+    }
+
+    private var simpleSetupInvitation: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+            Text("Prefer one setup?")
+                .font(MuesliTheme.headline())
+                .foregroundStyle(MuesliTheme.textPrimary)
+            Text("Use automatic Chinese and English speech recognition on this Mac, with ChatGPT for cleanup, rewrites, and meeting notes. This replaces your current model choices. Text and any enabled context are sent to ChatGPT when those writing features run; speech recognition stays local. A one-time speech download may be needed.")
+                .font(MuesliTheme.callout())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Use simple Chinese & English setup") {
+                guard canAdoptSimpleSetup else { return }
+                controller.updateConfig { config in
+                    // Keep a previous cleanup opt-out when adopting the setup.
+                    if !config.enablePostProcessor {
+                        config.setDictationCleanupStrength(.none)
+                    }
+                    config.usesSimpleBilingualSetup = true
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(!canAdoptSimpleSetup)
+        }
+        .padding(MuesliTheme.spacing20)
+        .frame(maxWidth: 740, alignment: .leading)
+        .background(MuesliTheme.backgroundRaised)
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium))
+    }
+
+    private var canAdoptSimpleSetup: Bool {
+        appState.dictationState == .idle && !appState.isMeetingRecording
+            && !appState.isMeetingStarting && !appState.isMeetingProcessing
+            && appState.retranscribingMeetingID == nil && downloadingModels.isEmpty
+            && downloadingPostProcModels.isEmpty && !isDownloadingLiveCaptionModel
+            && !simplePreparationInProgress
     }
 
     private var modelsCategorySelection: Binding<ModelsCategory> {

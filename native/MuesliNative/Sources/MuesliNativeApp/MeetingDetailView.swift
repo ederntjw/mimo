@@ -213,6 +213,7 @@ struct MeetingDetailView: View {
                 configuredModel: appState.config.meetingFinalPassEnabled
                     ? appState.config.resolvedMeetingFinalBackend
                     : appState.selectedMeetingTranscriptionBackend,
+                usesSimpleBilingualSetup: appState.config.usesSimpleBilingualSetup,
                 isBlocked: controller.isRetranscriptionBlocked,
                 onCancel: { retranscriptionMeeting = nil },
                 onManageModels: {
@@ -889,7 +890,9 @@ struct MeetingDetailView: View {
                     retranscriptionMeeting = meeting
                 }
                 .disabled(meeting.status == .recording || meeting.status == .processing || isEditingNotes || isEditingTranscript)
-                .help("Choose a transcription model for this saved recording")
+                .help(appState.config.usesSimpleBilingualSetup
+                      ? "Transcribe this saved recording again in Chinese and English"
+                      : "Choose a transcription model for this saved recording")
                 .accessibilityIdentifier("meeting.chooseRetranscriptionModel")
             }
         }

@@ -86,6 +86,80 @@ struct InferenceGateTests {
 @Suite("TranscriptionCoordinator routing")
 struct TranscriptionCoordinatorTests {
 
+    @Test("None preserves bilingual words and the original when a caller enables cleanup")
+    func noCleanupPreservesSource() async throws {
+        let source = "Um, 预算是五千美元。 I kind of agree."
+        let transcriber = WhisperKitTranscriber(modelLoader: { _, _, _ in
+            CleanupSourceWhisperRuntime(text: source)
+        })
+        let coordinator = TranscriptionCoordinator(whisperTranscriber: transcriber)
+        var config = AppConfig()
+        config.usesSimpleBilingualSetup = true
+        config.setDictationCleanupStrength(.none)
+        await coordinator.configurePostProcessor(
+            backend: .hosted(.customLLM), option: nil, systemPrompt: "Rewrite", config: config
+        )
+        let result = try await coordinator.transcribeDictation(
+            at: URL(fileURLWithPath: "/unused/cleanup.wav"), backend: .whisperLargeV3,
+            enablePostProcessor: true
+        )
+        #expect(result.text == source)
+        #expect(result.originalText == source)
+    }
+
+    @Test("unavailable simple cleanup keeps source text while legacy filler filtering remains")
+    func unavailableCleanupPreservesSource() async throws {
+        let source = "Um, I kind of agree."
+        let transcriber = WhisperKitTranscriber(modelLoader: { _, _, _ in
+            CleanupSourceWhisperRuntime(text: source)
+        })
+        let coordinator = TranscriptionCoordinator(whisperTranscriber: transcriber)
+        var config = AppConfig()
+        config.usesSimpleBilingualSetup = true
+        config.setDictationCleanupStrength(.light)
+        await coordinator.configurePostProcessor(
+            backend: .hosted(.chatGPT), option: nil, systemPrompt: "Rewrite", config: config
+        )
+        let result = try await coordinator.transcribeDictation(
+            at: URL(fileURLWithPath: "/unused/cleanup.wav"), backend: .whisperLargeV3,
+            enablePostProcessor: false
+        )
+        #expect(result.text == source)
+        #expect(result.originalText == source)
+
+        config.usesSimpleBilingualSetup = false
+        await coordinator.configurePostProcessor(
+            backend: .hosted(.chatGPT), option: nil, systemPrompt: "Rewrite", config: config
+        )
+        let legacy = try await coordinator.transcribeDictation(
+            at: URL(fileURLWithPath: "/unused/cleanup.wav"), backend: .whisperLargeV3,
+            enablePostProcessor: false
+        )
+        #expect(legacy.text == "I agree.")
+        #expect(legacy.originalText == source)
+    }
+
+    @Test("spoken snippets preserve literal expansion and source before cleanup and dictionary edits")
+    func spokenSnippetRouting() async throws {
+        let recorder = ModelSelectionRecorder()
+        let transcriber = WhisperKitTranscriber(modelLoader: { model, _, _ in
+            ModelSelectionWhisperRuntime(model: model, recorder: recorder)
+        })
+        let coordinator = TranscriptionCoordinator(whisperTranscriber: transcriber)
+        let expansion = "\n  你好，Alex\nhttps://example.com/KeepCase\nBest regards\n\n"
+        let result = try await coordinator.transcribeDictation(
+            at: URL(fileURLWithPath: "/unused/snippet.wav"),
+            backend: .whisperLargeV3,
+            enablePostProcessor: true,
+            customWords: [["word": "Alex", "replacement": "Changed"]],
+            spokenSnippets: [.init(trigger: "transcript from large-v3", expansion: expansion)]
+        )
+        #expect(result.text == expansion)
+        #expect(result.originalText == "Transcript from large-v3")
+        #expect(result.isSnippetExpansion)
+        #expect(result.segments.isEmpty)
+    }
+
     @Test("coordinator initializes without crash")
     func initDoesNotCrash() {
         let _ = TranscriptionCoordinator()
@@ -901,6 +975,12 @@ struct Qwen3PostProcessingOutputCleanerTests {
             input: #"Subject quote Muesli launch notes body ask Priyanka to review the quote AI Models quote settings copy"#
         ))
     }
+}
+
+private struct CleanupSourceWhisperRuntime: WhisperKitModelRuntime {
+    let text: String
+    func transcribe(wavURL: URL, decodeOptions: DecodingOptions) async throws -> String { text }
+    func warmup() async throws {}
 }
 
 private struct TimestampedWhisperRuntime: WhisperKitModelRuntime {

@@ -17,9 +17,7 @@ struct SidebarToggleButton: View {
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(MuesliTheme.textSecondary)
                 .frame(width: 36, height: 36)
-                .background(MuesliTheme.backgroundRaised.opacity(0.72))
-                .clipShape(Circle())
-                .overlay(Circle().strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1))
+                .contentShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
         }
         .buttonStyle(.plain)
         .help(accessibilityTitle)
@@ -34,7 +32,7 @@ struct SidebarView: View {
     /// Matches the search field's inner padding so the row icon column sits
     /// exactly under the magnifier instead of 6pt to its right.
     private let sidebarRowHorizontalPadding: CGFloat = 10
-    private let sidebarRowOuterPadding: CGFloat = 8
+    private let sidebarRowOuterPadding: CGFloat = 12
     /// Indent for nested Meetings section rows. The sidebar is narrow (260pt by
     /// default), so show nesting by indent, but economically.
     private let meetingsChildIndent: CGFloat = 24
@@ -45,7 +43,7 @@ struct SidebarView: View {
     var isCollapsed: Bool = false
     var onToggleCollapsed: () -> Void = {}
     @Environment(\.colorScheme) private var colorScheme
-    @State private var meetingsExpanded = true
+    @State private var meetingsExpanded = false
     @State private var renamingFolderID: Int64?
     @State private var renamingFolderName = ""
     @State private var folderToDelete: MeetingFolder?
@@ -145,15 +143,16 @@ struct SidebarView: View {
                 .padding(.top, MuesliTheme.spacing16)
                 .padding(.bottom, MuesliTheme.spacing12)
 
-            collapsedItem(tab: .timeline, icon: "clock", label: "Timeline")
+            collapsedItem(tab: .timeline, icon: "house", label: "Home")
             collapsedItem(tab: .dictations, icon: "waveform", label: "Dictations")
             collapsedItem(tab: .meetings, icon: "person.2", label: "Meetings")
             collapsedItem(tab: .insights, icon: "chart.bar.xaxis", label: "Insights")
             collapsedItem(tab: .dictionary, icon: "character.book.closed", label: "Dictionary")
+            collapsedItem(tab: .snippets, icon: "text.badge.plus", label: "Snippets")
 
             Spacer()
 
-            collapsedItem(tab: .models, icon: "cpu", label: "Models")
+            collapsedItem(tab: .models, icon: "cpu", label: appState.config.usesSimpleBilingualSetup ? "Speech & notes" : "Models")
             collapsedItem(tab: .shortcuts, icon: "command", label: "Shortcuts")
             collapsedItem(tab: .settings, icon: "gearshape", label: "Settings")
             collapsedItem(tab: .about, icon: "info.circle", label: "About")
@@ -202,33 +201,40 @@ struct SidebarView: View {
     }
 
     private var expandedSidebar: some View {
-        VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
+        VStack(alignment: .leading, spacing: 2) {
             sidebarHeader
             searchBar
 
-            sidebarItem(tab: .timeline, icon: "clock", label: "Timeline")
-            sidebarItem(tab: .dictations, icon: "waveform", label: "Dictations")
-            meetingsSection
-            sidebarItem(tab: .insights, icon: "chart.bar.xaxis", label: "Insights")
-            sidebarItem(tab: .dictionary, icon: "character.book.closed", label: "Dictionary")
-
-            Spacer()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    sidebarItem(tab: .timeline, icon: "house", label: "Home")
+                    sectionLabel("Library")
+                    sidebarItem(tab: .dictations, icon: "waveform", label: "Dictations")
+                    meetingsSection
+                    sidebarItem(tab: .insights, icon: "chart.bar.xaxis", label: "Insights")
+                    sidebarItem(tab: .dictionary, icon: "character.book.closed", label: "Dictionary")
+                    sidebarItem(tab: .snippets, icon: "text.badge.plus", label: "Snippets")
+                }
+            }
+            .scrollIndicators(.hidden)
 
             modelPreparationStatus
-            sidebarItem(tab: .models, icon: "cpu", label: "Models")
+            sectionLabel("Personalize")
+            sidebarItem(tab: .models, icon: "cpu", label: appState.config.usesSimpleBilingualSetup ? "Speech & notes" : "Models")
             sidebarItem(tab: .shortcuts, icon: "command", label: "Shortcuts")
             sidebarItem(tab: .settings, icon: "gearshape", label: "Settings")
             sidebarItem(tab: .about, icon: "info.circle", label: "About", updateCTA: pendingUpdateCTA)
             darkModeToggle
-                .padding(.top, MuesliTheme.spacing12)
+                .padding(.top, MuesliTheme.spacing8)
                 .padding(.bottom, MuesliTheme.spacing16)
         }
         .frame(maxHeight: .infinity)
         .background(SidebarThemeBackground())
+        .onAppear {
+            meetingsExpanded = appState.selectedTab == .meetings
+        }
         .onChange(of: appState.selectedTab) { _, tab in
-            if tab == .meetings {
-                meetingsExpanded = true
-            }
+            meetingsExpanded = tab == .meetings
             // Reset drag state if user navigates away during a drag
             if draggingFolderID != nil {
                 draggingFolderID = nil
@@ -261,16 +267,26 @@ struct SidebarView: View {
         }
     }
 
+    private func sectionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(MuesliTheme.textTertiary)
+            .padding(.horizontal, sidebarRowOuterPadding + sidebarRowHorizontalPadding)
+            .padding(.top, MuesliTheme.spacing16)
+            .padding(.bottom, MuesliTheme.spacing8)
+            .accessibilityAddTraits(.isHeader)
+    }
+
     @ViewBuilder
     private var sidebarHeader: some View {
         let visualTheme = MuesliVisualTheme.resolved(appState.config.visualTheme)
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                 HStack(spacing: MuesliTheme.spacing12) {
-                    MimoApplicationIconView(theme: visualTheme, size: 30)
+                    MimoApplicationIconView(theme: visualTheme, size: 28)
                         .overlay(MuesliBrandThemeAccents())
                     Text(AppIdentity.brandName)
-                        .font(MuesliTheme.title2())
+                        .font(.system(size: 18, weight: .semibold))
                         .foregroundStyle(MuesliTheme.textPrimary)
                 }
                 if !userName.isEmpty {
@@ -285,7 +301,7 @@ struct SidebarView: View {
         }
         .padding(.horizontal, MuesliTheme.spacing16)
         .padding(.top, MuesliTheme.pageTop)
-        .padding(.bottom, MuesliTheme.spacing20)
+        .padding(.bottom, MuesliTheme.spacing16)
     }
 
     @ViewBuilder
@@ -295,7 +311,7 @@ struct SidebarView: View {
                 .font(.system(size: 12))
                 .foregroundStyle(MuesliTheme.textTertiary)
                 .frame(width: sidebarIconColumnWidth, alignment: .center)
-            TextField("Search...", text: searchTextBinding)
+            TextField("Search anything", text: searchTextBinding)
                 .textFieldStyle(.plain)
                 .font(MuesliTheme.callout())
                 .foregroundStyle(MuesliTheme.textPrimary)
@@ -310,10 +326,16 @@ struct SidebarView: View {
                         .foregroundStyle(MuesliTheme.textTertiary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            } else {
+                Text("⌘F")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(MuesliTheme.textTertiary)
+                    .accessibilityHidden(true)
             }
         }
         .padding(.horizontal, sidebarRowHorizontalPadding)
-        .frame(height: 32)
+        .frame(height: 34)
         .background(MuesliTheme.backgroundRaised)
         .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
         .overlay(
@@ -334,7 +356,7 @@ struct SidebarView: View {
     private var meetingsSection: some View {
         VStack(alignment: .leading, spacing: 2) {
             let isSelected = appState.selectedTab == .meetings
-            HStack(spacing: MuesliTheme.spacing12) {
+            HStack(spacing: MuesliTheme.spacing4) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
                         meetingsExpanded = true
@@ -347,7 +369,7 @@ struct SidebarView: View {
                             .foregroundStyle(isSelected ? MuesliTheme.accent : MuesliTheme.textSecondary)
                             .frame(width: sidebarIconColumnWidth)
                         Text("Meetings")
-                            .font(MuesliTheme.headline())
+                            .font(MuesliTheme.body().weight(isSelected ? .medium : .regular))
                             .foregroundStyle(isSelected ? MuesliTheme.textPrimary : MuesliTheme.textSecondary)
                         Spacer(minLength: 0)
                     }
@@ -355,6 +377,7 @@ struct SidebarView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
 
                 Button {
                     withAnimation(.easeInOut(duration: 0.15)) {
@@ -367,6 +390,8 @@ struct SidebarView: View {
                         .frame(width: meetingsTrailingColumnWidth, height: 18)
                 }
                 .buttonStyle(.plain)
+                .help(meetingsExpanded ? "Hide meeting folders" : "Show meeting folders")
+                .accessibilityLabel(meetingsExpanded ? "Hide meeting folders" : "Show meeting folders")
 
                 Button(action: createNewFolder) {
                     Image(systemName: "folder.badge.plus")
@@ -376,6 +401,7 @@ struct SidebarView: View {
                 }
                 .buttonStyle(.plain)
                 .help("New Meeting Folder")
+                .accessibilityLabel("New Meeting Folder")
             }
             .padding(.horizontal, sidebarRowHorizontalPadding)
             .padding(.vertical, MuesliTheme.spacing8)
@@ -484,11 +510,11 @@ struct SidebarView: View {
                 .frame(width: sidebarIconColumnWidth, height: sidebarIconColumnWidth)
 
                 VStack(alignment: .leading, spacing: 1) {
-                    Text(title)
+                    Text(appState.config.usesSimpleBilingualSetup ? (appState.modelPreparationIsComplete ? "Speech is ready" : "Preparing speech") : title)
                         .font(.system(size: 11, weight: .semibold, design: .rounded))
                         .foregroundStyle(MuesliTheme.textSecondary)
                         .lineLimit(1)
-                    if let detail = appState.modelPreparationDetail, !detail.isEmpty {
+                    if !appState.config.usesSimpleBilingualSetup, let detail = appState.modelPreparationDetail, !detail.isEmpty {
                         Text(detail)
                             .font(.system(size: 10, weight: .medium, design: .rounded))
                             .foregroundStyle(MuesliTheme.textTertiary)
@@ -531,7 +557,7 @@ struct SidebarView: View {
                     .foregroundStyle(isSelected ? MuesliTheme.accent : MuesliTheme.textSecondary)
                     .frame(width: sidebarIconColumnWidth, height: sidebarIconColumnWidth, alignment: .center)
                 Text(label)
-                    .font(MuesliTheme.headline())
+                    .font(MuesliTheme.body().weight(isSelected ? .medium : .regular))
                     .foregroundStyle(isSelected ? MuesliTheme.textPrimary : MuesliTheme.textSecondary)
                 Spacer()
                 if let updateCTA {
@@ -563,6 +589,7 @@ struct SidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .padding(.horizontal, sidebarRowOuterPadding)
         .featureTourTarget(tab == .timeline ? .timelineSidebar : nil)
     }
@@ -587,6 +614,8 @@ struct SidebarView: View {
                     )
             }
             .buttonStyle(.plain)
+            .help("Light appearance")
+            .accessibilityLabel("Light appearance")
 
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
@@ -604,6 +633,8 @@ struct SidebarView: View {
                     )
             }
             .buttonStyle(.plain)
+            .help("Dark appearance")
+            .accessibilityLabel("Dark appearance")
         }
         .padding(2)
         .background(

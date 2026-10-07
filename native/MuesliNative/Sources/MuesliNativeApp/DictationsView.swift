@@ -36,11 +36,11 @@ struct DictationsView: View {
                 currentRecords = []
 
                 if dayStart == today {
-                    currentHeader = "TODAY"
+                    currentHeader = "Today"
                 } else if dayStart == yesterday {
-                    currentHeader = "YESTERDAY"
+                    currentHeader = "Yesterday"
                 } else {
-                    currentHeader = dateHeaderFormatter.string(from: date).uppercased()
+                    currentHeader = dateHeaderFormatter.string(from: date)
                 }
             }
             currentRecords.append(record)
@@ -54,13 +54,19 @@ struct DictationsView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            DashboardPageHeader(
-                title: "Dictations",
-                appState: appState,
-                controller: controller
-            )
-                .padding(.horizontal, MuesliTheme.spacing24)
-                .padding(.top, MuesliTheme.pageTop)
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                DashboardPageHeader(
+                    title: "Dictations",
+                    appState: appState,
+                    controller: controller
+                )
+                Text("Find, copy, and revisit everything you’ve dictated.")
+                    .font(MuesliTheme.callout())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, MuesliTheme.spacing24)
+            .padding(.top, MuesliTheme.pageTop)
 
             StatsHeaderView(
                 dictationStats: appState.filteredDictationStats,
@@ -90,17 +96,38 @@ struct DictationsView: View {
 
             if appState.dictationRows.isEmpty {
                 Spacer()
-                VStack(spacing: MuesliTheme.spacing12) {
-                    Image(systemName: "mic.badge.plus")
-                        .font(.system(size: 40, weight: .thin))
-                        .foregroundStyle(MuesliTheme.textTertiary)
+                VStack(spacing: MuesliTheme.spacing16) {
+                    Image(systemName: hasActiveFilters ? "magnifyingglass" : "waveform")
+                        .font(.system(size: 28, weight: .medium))
+                        .foregroundStyle(MuesliTheme.accent)
+                        .frame(width: 64, height: 64)
+                        .background(MuesliTheme.accentSubtle)
+                        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerLarge))
                     Text(emptyStateTitle)
                         .font(MuesliTheme.title3())
-                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .foregroundStyle(MuesliTheme.textPrimary)
                     Text(emptyStateInstruction)
                         .font(MuesliTheme.callout())
-                        .foregroundStyle(MuesliTheme.textTertiary)
+                        .foregroundStyle(MuesliTheme.textSecondary)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(4)
+                        .frame(maxWidth: 360)
+                    if !hasActiveFilters {
+                        Label(appState.config.dictationHotkey.label, systemImage: "keyboard")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(MuesliTheme.textPrimary)
+                            .padding(.horizontal, MuesliTheme.spacing12)
+                            .padding(.vertical, MuesliTheme.spacing8)
+                            .background(MuesliTheme.backgroundRaised)
+                            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall)
+                                    .strokeBorder(MuesliTheme.surfaceBorder, lineWidth: 1)
+                            }
+                            .accessibilityLabel("Dictation shortcut: \(appState.config.dictationHotkey.label)")
+                    }
                 }
+                .padding(MuesliTheme.spacing24)
                 Spacer()
             } else {
                 ScrollView {
@@ -110,7 +137,7 @@ struct DictationsView: View {
                                 HStack {
                                     Text(group.header)
                                         .font(.system(size: 12, weight: .semibold))
-                                        .foregroundStyle(MuesliTheme.textTertiary)
+                                        .foregroundStyle(MuesliTheme.textSecondary)
                                         .padding(.leading, MuesliTheme.spacing4)
                                 }
 
@@ -121,6 +148,11 @@ struct DictationsView: View {
                                             timeOnly: formatTimeOnly(record.timestamp),
                                             onCopy: {
                                                 controller.copyToClipboard(record.rawText)
+                                            },
+                                            onCopyOriginal: record.originalText == nil ? nil : {
+                                                if let original = record.originalText {
+                                                    controller.copyToClipboard(original)
+                                                }
                                             },
                                             onCopyTrace: record.computerUseTrace == nil ? nil : {
                                                 controller.copyToClipboard(ComputerUseTraceFormatter.debugText(for: record))
@@ -139,12 +171,13 @@ struct DictationsView: View {
                                                 Button {
                                                     controller.copyToClipboard(ComputerUseTraceFormatter.debugText(for: record))
                                                 } label: {
-                                                    Label("Copy CUA Trace", systemImage: "list.bullet.clipboard")
+                                                    Label("Copy action details", systemImage: "list.bullet.clipboard")
                                                 }
                                             }
                                         }
                                     }
                                 }
+                                .background(MuesliTheme.surfaceBorder.opacity(0.65))
                                 .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium)
@@ -169,15 +202,19 @@ struct DictationsView: View {
         }
     }
 
-    private var emptyStateInstruction: String {
-        if appState.dictationOriginFilter != .all
+    private var hasActiveFilters: Bool {
+        appState.dictationOriginFilter != .all
             || selectedFilter != .all
-            || appState.dictationApplicationFilter != nil {
-            return "Try another source, app, or time range"
+            || appState.dictationApplicationFilter != nil
+    }
+
+    private var emptyStateInstruction: String {
+        if hasActiveFilters {
+            return "Try a different device, app, or time range to find your words."
         }
         return appState.config.resolvedOnboardingUseCase.includesVoiceNotes
-            ? "Click Record Voice Note to capture your first note"
-            : "Hold \(appState.config.dictationHotkey.label) to start dictating"
+            ? "Record a voice note, or hold the shortcut below, speak, and release to save your words here."
+            : "Click a text field in any app, hold the shortcut below, and speak. Your words will appear here."
     }
 
     private var emptyStateTitle: String {
@@ -185,27 +222,52 @@ struct DictationsView: View {
             return "No dictations for \(application.name)"
         }
         switch appState.dictationOriginFilter {
-        case .all: return "No dictations yet"
+        case .all: return selectedFilter == .all ? "Your words, all in one place" : "No dictations in this time range"
         case .thisMac: return "No dictations from this Mac"
         case .fromIPhone: return "No dictations from iPhone"
         }
     }
 
     private var dictationFilterBar: some View {
-        HStack(spacing: MuesliTheme.spacing12) {
-            RecordOriginPicker(selection: Binding(
-                get: { appState.dictationOriginFilter },
-                set: { controller.filterDictations(origin: $0) }
-            ))
-            if !appState.dictationTargetApplications.isEmpty || appState.dictationApplicationFilter != nil {
-                TargetApplicationFilterMenu(
-                    applications: appState.dictationTargetApplications,
-                    selection: appState.dictationApplicationFilter,
-                    onSelect: { controller.filterDictations(application: $0) }
-                )
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: MuesliTheme.spacing12) {
+                originPicker
+                applicationFilter
+                Spacer(minLength: 0)
+                dateFilterButton
             }
-            Spacer(minLength: 0)
-            dateFilterButton
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                originPicker
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: MuesliTheme.spacing12) {
+                        applicationFilter
+                        Spacer(minLength: 0)
+                        dateFilterButton
+                    }
+                    VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                        applicationFilter
+                        dateFilterButton
+                    }
+                }
+            }
+        }
+    }
+
+    private var originPicker: some View {
+        RecordOriginPicker(selection: Binding(
+            get: { appState.dictationOriginFilter },
+            set: { controller.filterDictations(origin: $0) }
+        ))
+    }
+
+    @ViewBuilder
+    private var applicationFilter: some View {
+        if !appState.dictationTargetApplications.isEmpty || appState.dictationApplicationFilter != nil {
+            TargetApplicationFilterMenu(
+                applications: appState.dictationTargetApplications,
+                selection: appState.dictationApplicationFilter,
+                onSelect: { controller.filterDictations(application: $0) }
+            )
         }
     }
 
@@ -221,8 +283,8 @@ struct DictationsView: View {
                     .font(.system(size: 12, weight: .semibold))
             }
             .foregroundStyle(.white)
-            .padding(.horizontal, 12)
-            .frame(height: 30)
+            .padding(.horizontal, MuesliTheme.spacing16)
+            .frame(height: 36)
             .background(isRecording ? MuesliTheme.recording : MuesliTheme.accent)
             .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
             .overlay(alignment: .topTrailing) {
@@ -252,22 +314,23 @@ struct DictationsView: View {
                 }
             }
         } label: {
-            HStack(spacing: 4) {
-                Image(systemName: "line.3.horizontal.decrease")
+            HStack(spacing: 6) {
+                Image(systemName: "calendar")
                     .font(.system(size: 11))
-                if selectedFilter != .all {
-                    Text(selectedFilter.label)
-                        .font(.system(size: 11))
-                }
+                Text(selectedFilter.label)
+                    .font(.system(size: 12, weight: .medium))
             }
-            .foregroundStyle(selectedFilter != .all ? MuesliTheme.accent : MuesliTheme.textTertiary)
-            .padding(.horizontal, selectedFilter != .all ? 8 : 0)
-            .padding(.vertical, 3)
-            .background(selectedFilter != .all ? MuesliTheme.accent.opacity(0.12) : Color.clear)
-            .clipShape(Capsule())
+            .foregroundStyle(selectedFilter != .all ? MuesliTheme.accent : MuesliTheme.textSecondary)
+            .padding(.horizontal, MuesliTheme.spacing12)
+            .padding(.vertical, MuesliTheme.spacing8)
+            .background(selectedFilter != .all ? MuesliTheme.accentSubtle : MuesliTheme.backgroundRaised)
+            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .help("Filter dictations by time range")
+        .accessibilityLabel("Time range")
+        .accessibilityValue(selectedFilter.label)
     }
 
     /// Build filter options dynamically based on the date range of actual data.

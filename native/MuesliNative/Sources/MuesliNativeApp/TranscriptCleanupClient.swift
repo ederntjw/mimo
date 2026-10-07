@@ -124,12 +124,17 @@ enum TranscriptCleanupClient {
         config: AppConfig
     ) async throws -> TranscriptCleanupResult {
         let model = configuredModel(for: backend, config: config)
+        if config.usesSimpleBilingualSetup, config.resolvedDictationCleanupStrength == .none {
+            return TranscriptCleanupResult(rawOutput: text, cleanedOutput: text, model: model)
+        }
         let userPrompt = Qwen3PostProcessorConfig.formatInput(
             text,
             appContext: appContext,
             maxAppContextCharacters: hostedAppContextCharacterLimit
         )
-        let effectiveSystemPrompt = systemPromptWithAppContextGuidance(systemPrompt, appContext: appContext)
+        let effectiveSystemPrompt = systemPromptWithAppContextGuidance(
+            config.dictationCleanupSystemPrompt(configuredPrompt: systemPrompt), appContext: appContext
+        )
         let raw = try await generate(
             systemPrompt: effectiveSystemPrompt,
             userPrompt: userPrompt,

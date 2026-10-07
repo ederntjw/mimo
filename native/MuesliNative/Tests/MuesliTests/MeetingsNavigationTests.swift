@@ -99,7 +99,12 @@ struct MeetingsNavigationTests {
         dictationStore: DictationStore? = nil,
         configStore: ConfigStore? = nil
     ) -> MuesliController {
-        MuesliController(
+        let fixtureConfigStore = configStore ?? ConfigStore(supportDirectory: makeSupportDirectory())
+        if configStore == nil {
+            // These fixtures exercise the existing configurable-model workflow.
+            fixtureConfigStore.save(AppConfig())
+        }
+        return MuesliController(
             runtime: RuntimePaths(
                 repoRoot: FileManager.default.temporaryDirectory,
                 menuIcon: nil,
@@ -107,20 +112,22 @@ struct MeetingsNavigationTests {
                 bundlePath: nil
             ),
             dictationStore: dictationStore,
-            configStore: configStore ?? ConfigStore(supportDirectory: makeSupportDirectory())
+            configStore: fixtureConfigStore
         )
     }
 
     /// Model-routing fixtures must never consult the maintainer's account or database.
     private func makeIsolatedTranscriptionController() throws -> MuesliController {
         let supportDirectory = makeSupportDirectory()
+        let configStore = ConfigStore(supportDirectory: supportDirectory)
+        configStore.save(AppConfig())
         return MuesliController(
             runtime: RuntimePaths(
                 repoRoot: FileManager.default.temporaryDirectory,
                 menuIcon: nil, appIcon: nil, bundlePath: nil
             ),
             dictationStore: try makeStore(),
-            configStore: ConfigStore(supportDirectory: supportDirectory),
+            configStore: configStore,
             chatGPTAuth: ChatGPTAuthManager(
                 tokenFileURL: supportDirectory.appendingPathComponent("chatgpt-auth.json"),
                 migrateLegacyKeychain: false
@@ -1364,6 +1371,129 @@ struct MeetingsNavigationTests {
         #expect(!controller.appState.isOpenRouterAuthenticated)
     }
 
+    @Test("saved snippets defer Nemotron handsfree insertion until the whole utterance is available")
+    func snippetsUseBufferedNemotronDictation() throws {
+        let controller = try makeIsolatedTranscriptionController()
+        controller.updateConfig {
+            $0.sttBackend = BackendOption.nemotron35Multilingual.backend
+            $0.sttModel = BackendOption.nemotron35Multilingual.model
+            $0.dictationProvider = DictationProvider.local.rawValue
+        }
+        #expect(controller.shouldStreamDictationAtCursor)
+
+        let snippet = SpokenSnippet(trigger: "my signature", expansion: "Regards,\nEdern  ")
+        try controller.snippetStore.save(snippet)
+        #expect(!controller.shouldStreamDictationAtCursor)
+        #expect(controller.selectedBackend == .nemotron35Multilingual)
+
+        try controller.snippetStore.delete(id: snippet.id)
+        #expect(controller.shouldStreamDictationAtCursor)
+
+        controller.updateConfig { $0.dictationProvider = DictationProvider.openAI.rawValue }
+        #expect(!controller.shouldStreamDictationAtCursor)
+    }
+
+    @Test("an unreadable snippet library does not change the existing live insertion mode")
+    func unreadableSnippetsPreserveNemotronStreaming() throws {
+        let controller = try makeIsolatedTranscriptionController()
+        controller.updateConfig {
+            $0.sttBackend = BackendOption.nemotron35Multilingual.backend
+            $0.sttModel = BackendOption.nemotron35Multilingual.model
+        }
+        try controller.snippetStore.save(SpokenSnippet(trigger: "my signature", expansion: "Saved text"))
+        try Data("invalid JSON".utf8).write(to: controller.snippetStore.fileURL)
+        #expect(throws: (any Error).self) { try controller.snippetStore.reload() }
+        #expect(controller.shouldStreamDictationAtCursor)
+    }
+
+    @Test("simple setup keeps the chosen engine when only smaller alternatives are installed")
+    func simpleSetupDoesNotFallBackToSmallerEngines() throws {
+        let controller = try makeIsolatedTranscriptionController()
+        controller.updateConfig { $0.usesSimpleBilingualSetup = true }
+
+        let unavailable = controller.refreshMeetingTranscriptionSelectionForAvailability(
+            downloadedOptions: [.senseVoiceSmall, .whisperLargeTurbo, .whisperTiny]
+        )
+        #expect(unavailable == nil)
+        #expect(controller.appState.selectedMeetingTranscriptionBackend == SimpleBilingualSetup.transcriptionBackend)
+        #expect(controller.config.meetingTranscriptionModel == SimpleBilingualSetup.transcriptionBackend.model)
+
+        let available = controller.refreshMeetingTranscriptionSelectionForAvailability(
+            downloadedOptions: [.senseVoiceSmall, SimpleBilingualSetup.transcriptionBackend]
+        )
+        #expect(available == SimpleBilingualSetup.transcriptionBackend)
+        #expect(controller.appState.selectedMeetingTranscriptionBackend == available)
+    }
+
+    @Test("simple setup normalizes config mutations and rejects alternate runtime selectors")
+    func simpleSetupNormalizesControllerChanges() throws {
+        let controller = try makeIsolatedTranscriptionController()
+        controller.updateConfig {
+            $0.usesSimpleBilingualSetup = true
+            $0.sttBackend = BackendOption.parakeetEnglish.backend
+            $0.sttModel = BackendOption.parakeetEnglish.model
+            $0.dictationProvider = DictationProvider.openAI.rawValue
+            $0.whisperLanguage = "en"
+            $0.meetingFinalPassEnabled = false
+            $0.meetingFinalTranscriptionModel = BackendOption.whisperTiny.model
+            $0.meetingSummaryBackend = MeetingSummaryBackendOption.ollama.backend
+            $0.postProcessorBackend = TranscriptCleanupBackendOption.local.backend
+        }
+
+        // Legacy actions must not overwrite runtime state after config normalizes.
+        controller.selectBackend(.whisperTiny)
+        controller.selectDictationProvider(.openAI)
+        controller.selectMeetingTranscriptionBackend(.senseVoiceSmall, requireDownloaded: false)
+        controller.selectMeetingFinalTranscriptionBackend(.whisperLargeTurbo)
+        controller.selectPostProcessor(.defaultOption)
+        controller.selectPostProcessorBackend(.local)
+        controller.selectMeetingSummaryBackend(.ollama)
+
+        #expect(controller.selectedBackend == SimpleBilingualSetup.transcriptionBackend)
+        #expect(controller.appState.selectedBackend == SimpleBilingualSetup.transcriptionBackend)
+        #expect(controller.selectedDictationProvider == .local)
+        #expect(controller.appState.selectedMeetingTranscriptionBackend == SimpleBilingualSetup.transcriptionBackend)
+        #expect(controller.config.resolvedMeetingFinalBackend == SimpleBilingualSetup.transcriptionBackend)
+        #expect(controller.config.meetingFinalPassEnabled)
+        #expect(controller.config.resolvedWhisperLanguage == .auto)
+        #expect(controller.selectedPostProcessorBackend == .hosted(.chatGPT))
+        #expect(controller.appState.selectedPostProcessorBackend == .hosted(.chatGPT))
+        #expect(controller.config.meetingSummaryBackend == MeetingSummaryBackendOption.chatGPT.backend)
+        #expect(controller.config.chatGPTModel == SimpleBilingualSetup.writingModel)
+        #expect(!controller.appState.isChatGPTAuthenticated)
+        #expect(!controller.appState.isOpenRouterAuthenticated)
+    }
+
+    @Test("meeting sessions use the fixed simple engine at initialization and backend updates")
+    func meetingSessionKeepsSimpleEngine() {
+        var config = AppConfig()
+        config.usesSimpleBilingualSetup = true
+        config.applySimpleBilingualSetupIfNeeded()
+        let runtime = RuntimePaths(
+            repoRoot: FileManager.default.temporaryDirectory,
+            menuIcon: nil, appIcon: nil, bundlePath: nil
+        )
+        let session = MeetingSession(
+            title: "Routing test", calendarEventID: nil, backend: .senseVoiceSmall,
+            runtime: runtime, config: config, templateSnapshot: MeetingTemplates.auto.snapshot,
+            transcriptionCoordinator: TranscriptionCoordinator()
+        )
+        #expect(session.currentBackend() == SimpleBilingualSetup.transcriptionBackend)
+        session.updateBackend(.whisperTiny)
+        #expect(session.currentBackend() == SimpleBilingualSetup.transcriptionBackend)
+
+        var legacyConfig = config
+        legacyConfig.usesSimpleBilingualSetup = false
+        let legacySession = MeetingSession(
+            title: "Legacy routing test", calendarEventID: nil, backend: .whisperLargeV3,
+            runtime: runtime, config: legacyConfig, templateSnapshot: MeetingTemplates.auto.snapshot,
+            transcriptionCoordinator: TranscriptionCoordinator()
+        )
+        #expect(legacySession.currentBackend() == .senseVoiceSmall)
+        legacySession.updateBackend(.whisperLargeTurbo)
+        #expect(legacySession.currentBackend() == .senseVoiceSmall)
+    }
+
     @Test("selecting Gemma dictation replaces conflicting Gemma cleanup")
     func selectingGemmaDictationReplacesGemmaCleanup() {
         let controller = makeController()
@@ -1415,6 +1545,7 @@ struct MeetingsNavigationTests {
     func disconnectingOpenRouterFallsBackSafely() throws {
         let supportDirectory = makeSupportDirectory()
         let configStore = ConfigStore(supportDirectory: supportDirectory)
+        configStore.save(AppConfig())
         let credentialStore = OpenRouterCredentialStore(supportDirectory: supportDirectory)
         let openRouterAuth = OpenRouterAuthManager(
             credentialStore: credentialStore,
@@ -1611,6 +1742,7 @@ struct MeetingsNavigationTests {
     func failedOpenRouterDisconnectPreservesSelections() throws {
         let supportDirectory = makeSupportDirectory()
         let configStore = ConfigStore(supportDirectory: supportDirectory)
+        configStore.save(AppConfig())
         let credentialStore = OpenRouterCredentialStore(supportDirectory: supportDirectory)
         try credentialStore.save(OpenRouterCredential(apiKey: "sk-or-v1-retained", userID: nil))
         let openRouterAuth = OpenRouterAuthManager(
@@ -1649,6 +1781,7 @@ struct MeetingsNavigationTests {
     func environmentOpenRouterCredentialPreservesSelections() throws {
         let supportDirectory = makeSupportDirectory()
         let configStore = ConfigStore(supportDirectory: supportDirectory)
+        configStore.save(AppConfig())
         let credentialStore = OpenRouterCredentialStore(supportDirectory: supportDirectory)
         let openRouterAuth = OpenRouterAuthManager(
             credentialStore: credentialStore,

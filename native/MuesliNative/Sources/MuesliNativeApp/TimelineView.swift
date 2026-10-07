@@ -4,6 +4,7 @@ import MuesliCore
 struct TimelineView: View {
     let appState: AppState
     let controller: MuesliController
+    @State private var showsFilters = false
 
     private struct DayGroup: Identifiable {
         let id: Date
@@ -25,11 +26,11 @@ struct TimelineView: View {
         return entriesByDay.keys.sorted(by: >).map { day in
             let header: String
             if day == today {
-                header = "TODAY"
+                header = "Today"
             } else if day == yesterday {
-                header = "YESTERDAY"
+                header = "Yesterday"
             } else {
-                header = day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)).uppercased()
+                header = day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated))
             }
             return DayGroup(id: day, header: header, entries: entriesByDay[day] ?? [])
         }
@@ -38,55 +39,177 @@ struct TimelineView: View {
     var body: some View {
         VStack(spacing: 0) {
             DashboardPageHeader(
-                title: "Timeline",
+                title: "Home",
                 appState: appState,
                 controller: controller
             )
                 .padding(.horizontal, MuesliTheme.spacing24)
-                .padding(.top, MuesliTheme.pageTop)
-
-            StatsHeaderView(
-                dictationStats: appState.dictationStats,
-                meetingStats: appState.meetingStats,
-                showsMeetingStat: true,
-                tracksInsightsFeatureTour: true,
-                onSelect: { controller.openInsights(section: $0) }
-            )
-
-            if appState.config.showIOSCompanionPrompt {
-                MimoAccountSyncCard(appState: appState, controller: controller)
-                    .padding(.horizontal, MuesliTheme.spacing24)
-                    .padding(.bottom, MuesliTheme.spacing12)
-            }
-
-            filterBar
-                .padding(.horizontal, MuesliTheme.spacing24)
+                .padding(.top, MuesliTheme.spacing20)
                 .padding(.bottom, MuesliTheme.spacing12)
 
-            if appState.timelineRows.isEmpty {
-                emptyState
-            } else {
-                timelineScrollView
+            timelineScrollView
+        }
+    }
+
+    private var welcomeCard: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing20) {
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                Text(appState.config.userName.isEmpty ? "Make room for your thoughts." : "Welcome back, \(appState.config.userName).")
+                    .font(MuesliTheme.displayTitle())
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Speak an idea. Capture a conversation. Find it all here.")
+                    .font(MuesliTheme.body())
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: MuesliTheme.spacing12) {
+                    voiceNoteAction
+                    meetingAction
+                }
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+                    voiceNoteAction
+                    meetingAction
+                }
+            }
+
+            Button {
+                appState.selectedTab = .shortcuts
+            } label: {
+                HStack(alignment: .top, spacing: MuesliTheme.spacing8) {
+                    Image(systemName: "keyboard")
+                    Text(appState.config.resolvedOnboardingUseCase.includesVoiceNotes
+                         ? "Hold \(appState.config.dictationHotkey.label), speak, then release to save a voice note."
+                         : "To write in another app, hold \(appState.config.dictationHotkey.label), speak, then release.")
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .font(MuesliTheme.caption())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .multilineTextAlignment(.leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("View your keyboard shortcuts")
+        }
+        .padding(MuesliTheme.spacing24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MuesliTheme.welcomeSurface)
+        .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerXL))
+    }
+
+    private var voiceNoteAction: some View {
+        Button {
+            controller.toggleVoiceNoteRecording()
+        } label: {
+            Label(voiceNoteLabel, systemImage: appState.isVoiceNoteRecording ? "stop.fill" : "mic")
+                .font(MuesliTheme.callout().weight(.medium))
+                .fixedSize()
+                .padding(.horizontal, MuesliTheme.spacing16)
+                .frame(height: 38)
+                .foregroundStyle(MuesliTheme.backgroundBase)
+                .background(MuesliTheme.textPrimary)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .disabled(appState.isMeetingRecording || appState.isMeetingStarting
+                  || (appState.dictationState != .idle && !appState.isVoiceNoteRecording))
+        .accessibilityIdentifier("home.recordVoiceNote")
+        .help("Record a voice note and save it to your history")
+    }
+
+    private var voiceNoteLabel: String {
+        if appState.isVoiceNoteRecording { return "Stop voice note" }
+        switch appState.dictationState {
+        case .idle: return "Record a voice note"
+        case .preparing: return "Preparing microphone…"
+        case .recording: return "Dictation in progress"
+        case .transcribing: return "Transcribing…"
+        }
+    }
+
+    private var meetingAction: some View {
+        Button {
+            if appState.isMeetingRecording || appState.isMeetingStarting {
+                if let id = appState.liveMeetingTranscriptOwnerID {
+                    controller.showMeetingDocument(id: id)
+                } else {
+                    controller.showMeetingsHome()
+                }
+            } else {
+                controller.startMeetingRecordingFromEntryPoint()
+            }
+        } label: {
+            Label(appState.isMeetingRecording || appState.isMeetingStarting ? "Open live meeting" : "Start a meeting", systemImage: "person.2")
+                .font(MuesliTheme.callout().weight(.medium))
+                .fixedSize()
+                .padding(.horizontal, MuesliTheme.spacing16)
+                .frame(height: 38)
+                .foregroundStyle(MuesliTheme.textPrimary)
+                .background(MuesliTheme.backgroundBase.opacity(0.65))
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+        }
+        .buttonStyle(.plain)
+        .disabled(appState.dictationState != .idle && !appState.isMeetingRecording && !appState.isMeetingStarting)
+        .accessibilityIdentifier("home.startMeeting")
+    }
+
+    private var hasActiveFilters: Bool {
+        appState.timelineOriginFilter != .all || appState.timelineApplicationFilter != nil
+            || appState.timelineDateFilter != .all
+    }
+
+    private var historyHeading: some View {
+        HStack {
+            Text("Recent activity")
+                .font(MuesliTheme.headline())
+                .foregroundStyle(MuesliTheme.textPrimary)
+            Spacer()
+            Button {
+                showsFilters.toggle()
+            } label: {
+                Label(hasActiveFilters ? "Filters applied" : "Filters", systemImage: "line.3.horizontal.decrease")
+                    .font(MuesliTheme.captionMedium())
+                    .foregroundStyle(hasActiveFilters ? MuesliTheme.accent : MuesliTheme.textSecondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(showsFilters || hasActiveFilters ? MuesliTheme.surfacePrimary : .clear)
+                    .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(showsFilters ? "Hide history filters" : "Show history filters")
         }
     }
 
     private var filterBar: some View {
-        HStack(spacing: MuesliTheme.spacing12) {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
             RecordOriginPicker(selection: Binding(
                 get: { appState.timelineOriginFilter },
                 set: { controller.filterTimeline(origin: $0) }
             ))
-            if !appState.dictationTargetApplications.isEmpty || appState.timelineApplicationFilter != nil {
+            HStack(spacing: MuesliTheme.spacing12) {
+              if !appState.dictationTargetApplications.isEmpty || appState.timelineApplicationFilter != nil {
                 TargetApplicationFilterMenu(
                     applications: appState.dictationTargetApplications,
                     selection: appState.timelineApplicationFilter,
                     onSelect: { controller.filterTimeline(application: $0) }
                 )
                 .featureTourTarget(.timelineApplications)
-            }
+              }
             Spacer(minLength: 0)
             dateFilterMenu
+            }
+            if hasActiveFilters {
+                Button("Clear filters") {
+                    controller.filterTimeline(origin: .all)
+                    controller.filterTimeline(application: nil)
+                    controller.filterTimeline(dateFilter: .all)
+                }
+                .buttonStyle(.plain)
+                .font(MuesliTheme.captionMedium())
+                .foregroundStyle(MuesliTheme.accent)
+            }
         }
     }
 
@@ -108,10 +231,8 @@ struct TimelineView: View {
             HStack(spacing: 4) {
                 Image(systemName: "line.3.horizontal.decrease")
                     .font(.system(size: 11))
-                if appState.timelineDateFilter != .all {
-                    Text(appState.timelineDateFilter.label)
-                        .font(.system(size: 11))
-                }
+                Text(appState.timelineDateFilter == .all ? "All time" : appState.timelineDateFilter.label)
+                    .font(MuesliTheme.caption())
             }
             .foregroundStyle(
                 appState.timelineDateFilter == .all
@@ -129,23 +250,25 @@ struct TimelineView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
+        .accessibilityLabel("Filter activity by date")
     }
 
     private var emptyState: some View {
         VStack(spacing: MuesliTheme.spacing12) {
-            Spacer()
-            Image(systemName: "clock.badge.questionmark")
-                .font(.system(size: 40, weight: .thin))
+            Image(systemName: hasActiveFilters ? "magnifyingglass" : "waveform")
+                .font(.system(size: 28, weight: .light))
                 .foregroundStyle(MuesliTheme.textTertiary)
             Text(emptyStateTitle)
                 .font(MuesliTheme.title3())
                 .foregroundStyle(MuesliTheme.textSecondary)
-            Text("Try another source, app, or time range")
+            Text(hasActiveFilters ? "Try another source, app, or time range." : "Your voice notes, dictations, and meetings will appear here. Start with an idea above.")
                 .font(MuesliTheme.callout())
                 .foregroundStyle(MuesliTheme.textTertiary)
-            Spacer()
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 340)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 40)
+        .frame(maxWidth: .infinity)
     }
 
     private var emptyStateTitle: String {
@@ -160,13 +283,41 @@ struct TimelineView: View {
     }
 
     private var timelineScrollView: some View {
+      ScrollViewReader { scrollProxy in
         ScrollView {
             LazyVStack(alignment: .leading, spacing: MuesliTheme.spacing20) {
+                welcomeCard
+
+                StatsHeaderView(
+                    dictationStats: appState.dictationStats,
+                    meetingStats: appState.meetingStats,
+                    showsMeetingStat: true,
+                    tracksInsightsFeatureTour: true,
+                    horizontalPadding: 0,
+                    onSelect: { controller.openInsights(section: $0) }
+                )
+                .id("home.insights")
+
+                if appState.config.showIOSCompanionPrompt {
+                    MimoAccountSyncCard(appState: appState, controller: controller)
+                }
+
+                historyHeading
+                if showsFilters || hasActiveFilters
+                    || appState.activeFeatureTourTarget == .timelineApplications
+                    || appState.activeFeatureTourTarget == .timelineFilters {
+                    filterBar
+                        .id("home.filters")
+                }
+                if appState.timelineRows.isEmpty {
+                    emptyState
+                }
+
                 ForEach(groupedEntries) { group in
                     VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
                         Text(group.header)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(MuesliTheme.textTertiary)
+                            .font(MuesliTheme.captionMedium())
+                            .foregroundStyle(MuesliTheme.textSecondary)
                             .padding(.leading, MuesliTheme.spacing4)
 
                         VStack(spacing: 1) {
@@ -176,6 +327,7 @@ struct TimelineView: View {
                             }
                         }
                         .scrollTargetLayout()
+                        .background(MuesliTheme.surfaceBorder)
                         .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium))
                         .overlay(
                             RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium)
@@ -190,13 +342,26 @@ struct TimelineView: View {
                         .onAppear { controller.loadMoreTimelineEntries() }
                 }
             }
+            .frame(maxWidth: 960)
             .padding(.horizontal, MuesliTheme.spacing24)
             .padding(.bottom, MuesliTheme.spacing24)
+            .frame(maxWidth: .infinity)
         }
         .scrollPosition(id: Binding(
             get: { appState.timelineScrollAnchor },
             set: { appState.timelineScrollAnchor = $0 }
         ), anchor: .top)
+        .onChange(of: appState.activeFeatureTourTarget, initial: true) { _, target in
+            switch target {
+            case .insightsEntry:
+                scrollProxy.scrollTo("home.insights", anchor: .top)
+            case .timelineApplications, .timelineFilters:
+                scrollProxy.scrollTo("home.filters", anchor: .top)
+            default:
+                break
+            }
+        }
+      }
     }
 
     @ViewBuilder
@@ -207,6 +372,11 @@ struct TimelineView: View {
                 record: record,
                 timeOnly: Self.formatTime(record.timestamp),
                 onCopy: { controller.copyToClipboard(record.rawText) },
+                onCopyOriginal: record.originalText == nil ? nil : {
+                    if let original = record.originalText {
+                        controller.copyToClipboard(original)
+                    }
+                },
                 onCopyTrace: record.computerUseTrace == nil ? nil : {
                     controller.copyToClipboard(ComputerUseTraceFormatter.debugText(for: record))
                 },
@@ -238,66 +408,116 @@ private struct TimelineMeetingRow: View {
     let record: MeetingRecord
     let onSelect: () -> Void
     @State private var isHovered = false
+    @State private var rowWidth: CGFloat = 0
+
+    private var isCompact: Bool { rowWidth < 560 }
 
     var body: some View {
-        HStack(alignment: .top, spacing: MuesliTheme.spacing20) {
-            Text(TimelineView.formatTime(record.startTime))
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
-                .foregroundStyle(MuesliTheme.textTertiary)
-                .frame(width: 80, alignment: .leading)
-                .padding(.top, 2)
-
-            VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
-                HStack(spacing: MuesliTheme.spacing8) {
-                    Image(systemName: "person.2.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(MuesliTheme.accent)
-                        .accessibilityLabel("Meeting")
-
-                    Text(record.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MuesliTheme.textPrimary)
-                        .lineLimit(1)
-
-                    Text(record.status.displayLabel)
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(record.status.displayColor)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(record.status.displayColor.opacity(0.12))
-                        .clipShape(Capsule())
-
-                    if let label = SyncOriginDisplay.badgeLabel(forMeetingSource: record.source) {
-                        SyncOriginBadge(label: label)
-                    } else {
-                        SyncOriginBadge(label: "Mac", help: "Recorded on this Mac")
+        Button(action: onSelect) {
+            Group {
+                if isCompact {
+                    VStack(alignment: .leading, spacing: MuesliTheme.spacing12) {
+                        timestamp
+                        meetingContent
                     }
-
-                    Spacer(minLength: 0)
-
-                    Text(Self.formatDuration(record.durationSeconds))
-                        .font(MuesliTheme.caption())
-                        .foregroundStyle(MuesliTheme.textTertiary)
+                } else {
+                    HStack(alignment: .top, spacing: MuesliTheme.spacing16) {
+                        timestamp
+                            .frame(width: 64, alignment: .leading)
+                            .padding(.top, 2)
+                        meetingContent
+                    }
                 }
-
-                Text(previewText)
-                    .font(MuesliTheme.callout())
-                    .foregroundStyle(MuesliTheme.textSecondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, MuesliTheme.spacing20)
+            .padding(.vertical, MuesliTheme.spacing16)
+            .background(isHovered ? MuesliTheme.backgroundHover : MuesliTheme.backgroundBase)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { rowWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { _, width in
+                        rowWidth = width
+                    }
             }
         }
-        .padding(.horizontal, MuesliTheme.spacing20)
-        .padding(.vertical, MuesliTheme.spacing16)
-        .background(isHovered ? MuesliTheme.backgroundHover : MuesliTheme.backgroundRaised)
-        .contentShape(Rectangle())
         .onHover { hovering in
             withAnimation(.easeInOut(duration: 0.15)) { isHovered = hovering }
         }
-        .onTapGesture(perform: onSelect)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
         .accessibilityHint("Open meeting")
+    }
+
+    private var timestamp: some View {
+        Text(TimelineView.formatTime(record.startTime))
+            .font(MuesliTheme.caption())
+            .foregroundStyle(MuesliTheme.textSecondary)
+    }
+
+    private var meetingContent: some View {
+        VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+            HStack(alignment: .firstTextBaseline, spacing: MuesliTheme.spacing8) {
+                Image(systemName: "person.2.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(MuesliTheme.accent)
+                    .accessibilityLabel("Meeting")
+                Text(record.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(MuesliTheme.textPrimary)
+                    .lineLimit(isCompact ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: MuesliTheme.spacing8) {
+                    metadataBadges
+                    Spacer(minLength: 0)
+                    duration
+                }
+                VStack(alignment: .leading, spacing: MuesliTheme.spacing8) {
+                    HStack(spacing: MuesliTheme.spacing8) { metadataBadges }
+                    duration
+                }
+            }
+
+            Text(previewText)
+                .font(MuesliTheme.callout())
+                .foregroundStyle(MuesliTheme.textSecondary)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .multilineTextAlignment(.leading)
+    }
+
+    @ViewBuilder
+    private var metadataBadges: some View {
+        if record.status != .completed {
+            Text(record.status.displayLabel)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(record.status.displayColor)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(record.status.displayColor.opacity(0.12))
+                .clipShape(Capsule())
+                .fixedSize()
+        }
+        if let label = SyncOriginDisplay.badgeLabel(forMeetingSource: record.source) {
+            SyncOriginBadge(label: label)
+                .fixedSize()
+        }
+    }
+
+    private var duration: some View {
+        Text(Self.formatDuration(record.durationSeconds))
+            .font(MuesliTheme.caption())
+            .foregroundStyle(MuesliTheme.textSecondary)
+            .fixedSize()
     }
 
     private var previewText: String {

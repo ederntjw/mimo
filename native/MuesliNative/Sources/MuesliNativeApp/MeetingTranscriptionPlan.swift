@@ -8,12 +8,21 @@ struct MeetingTranscriptionPlan: Equatable {
     let finalBackend: BackendOption?
 
     init(config: AppConfig, singlePassBackend: BackendOption) {
-        liveBackend = config.meetingFinalPassEnabled ? .senseVoiceSmall : singlePassBackend
-        finalBackend = config.meetingFinalPassEnabled ? config.resolvedMeetingFinalBackend : nil
+        if config.usesSimpleBilingualSetup {
+            liveBackend = SimpleBilingualSetup.transcriptionBackend
+            finalBackend = SimpleBilingualSetup.transcriptionBackend
+        } else {
+            liveBackend = config.meetingFinalPassEnabled ? .senseVoiceSmall : singlePassBackend
+            finalBackend = config.meetingFinalPassEnabled ? config.resolvedMeetingFinalBackend : nil
+        }
     }
 
     func missingModels(from available: [BackendOption]) -> [BackendOption] {
-        ([liveBackend] + (finalBackend.map { [$0] } ?? [])).filter { !available.contains($0) }
+        ([liveBackend] + (finalBackend.map { [$0] } ?? [])).reduce(into: []) { missing, backend in
+            if !available.contains(backend), !missing.contains(backend) {
+                missing.append(backend)
+            }
+        }
     }
 }
 

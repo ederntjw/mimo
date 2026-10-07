@@ -1,13 +1,36 @@
-# Choosing models in Mimo
+# Speech and writing in Mimo
 
-Reviewed September 10, 2026. The app separates language coverage from language
+Updated October 7, 2026. The app separates language coverage from language
 mixing: knowing several languages does not establish that a model can follow
 switches within one sentence. Transcription keeps the spoken language. Meeting
 summaries and generated notes are in English.
 
-## Reviewed meetings
+## Simple Chinese–English setup (0.9.0)
 
-By default, **Review recording after meeting** separates speed from the final
+New installations use one speech model: **full Whisper Large v3**, running locally
+through WhisperKit. It handles dictation, live meeting batches, and the final pass
+with automatic language detection. There is no separate SenseVoice preview or
+model chooser in this setup. Prepare it from **Speech & notes** before recording.
+
+Cleanup, meeting notes, questions, and Quill use the connected ChatGPT subscription.
+They send text to ChatGPT and need internet access and available account usage.
+No local writing model is required. Dictation cleanup defaults to Light; None skips
+the cleanup request, and Medium tidies more of the phrasing. Chinese–English
+cleanup preserves the spoken languages instead of translating them.
+
+The speech download is about 3.1 GB. Plan for at least 16 GB total Mac RAM,
+preferably 24 GB, and 9 GB free disk for preparation. These are conservative
+estimates, not a latency or accuracy guarantee. Live text arrives in completed
+batches; a full model can take longer than a smaller speech engine.
+
+Existing installations keep their previous configuration. The **Models** page
+offers an explicit switch to the simple setup and explains its ChatGPT text
+processing. Existing local-only users are not automatically moved to a cloud
+writing provider. The model catalogue below describes the retained advanced setup.
+
+## Reviewed meetings in the advanced setup
+
+In the advanced setup, **Review recording after meeting** separates speed from the final
 transcript. SenseVoice Small supplies live Mandarin–English text in short batches.
 After Stop, the selected Whisper model transcribes the complete recording, held
 temporarily for review. The user’s separate recording-save preference still applies.

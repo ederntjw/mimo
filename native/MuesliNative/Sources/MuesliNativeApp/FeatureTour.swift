@@ -111,9 +111,9 @@ enum FeatureTourCatalog {
         var steps = [
             FeatureTourStep(
                 id: "timeline",
-                eyebrow: "ONE TIMELINE",
+                eyebrow: "YOUR HOME",
                 title: "Dictations and meetings, together",
-                message: "Timeline puts your recent work in one chronological view. Open it from the sidebar whenever you want to retrace what you dictated or discussed.",
+                message: "Open Home from the sidebar to bring your recent work together. Record a voice note, start a meeting, or retrace what you dictated or discussed.",
                 systemImage: "clock.arrow.circlepath",
                 target: .timelineSidebar
             )
@@ -124,7 +124,7 @@ enum FeatureTourCatalog {
                 id: "timeline-apps",
                 eyebrow: "FILTER BY APP",
                 title: "Find dictations by destination app",
-                message: "Use Apps to narrow Timeline to dictations sent to a specific destination, such as Mail, Notes, or your browser.",
+                message: "Use Apps in the history filters to find dictations sent to a specific destination, such as Mail, Notes, or your browser.",
                 systemImage: "square.grid.2x2",
                 target: .timelineApplications
             ))

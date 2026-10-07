@@ -184,6 +184,7 @@ final class RecentHistoryWindowController: NSObject, NSWindowDelegate {
         // OS dark + app light). An opaque titlebar resolves against the
         // window's own appearance and background color, which we control.
         window.titlebarAppearsTransparent = false
+        window.titlebarSeparatorStyle = .none
         window.titleVisibility = .hidden
         window.backgroundColor = MuesliTheme.backgroundDeepNSColor
         applyAppearance(to: window)

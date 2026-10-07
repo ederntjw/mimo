@@ -18,6 +18,7 @@ case "${shard}" in
   core)
     filters=(
       ConfigStoreTests
+      OnboardingFlowTests
       DictationStoreTests
       MuesliCKSyncEngineTests
       MuesliCLITests
@@ -70,6 +71,9 @@ case "${shard}" in
       SpeechSegmentTests
       SpeechTranscriptionResultTests
       TranscriptionCoordinatorTests
+      SpokenSnippetMatcherTests
+      SpokenSnippetStoreTests
+      DictationCleanupStrengthTests
       TranscriptionEngineArtifactsFilterTests
       DiarizerRuntimePolicyTests
       DiarizerPreloadDiagnosticsTests

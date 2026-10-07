@@ -136,6 +136,100 @@ struct DictationStoreTests {
         try store.migrateIfNeeded() // idempotent
     }
 
+    @Test("dictation originals survive every history projection and stay device-local")
+    func dictationOriginalPersistence() throws {
+        let store = try makeStore()
+        let now = Date()
+        let original = "Um, 预算是五千美元, maybe Friday."
+        let output = "预算是五千美元, maybe Friday."
+        let id = try store.insertDictation(
+            text: output, originalText: original, durationSeconds: 4,
+            startedAt: now.addingTimeInterval(-4), endedAt: now
+        )
+        try store.migrateIfNeeded()
+        let direct = try #require(try store.dictation(id: id))
+        #expect(direct.rawText == output)
+        #expect(direct.originalText == original)
+        #expect(direct.wordCount == DictationStore.countWords(in: output))
+        #expect(try store.recentDictations().first?.originalText == original)
+        #expect(try store.searchDictations(query: "Friday").first?.originalText == original)
+        let timeline = try #require(try store.timelineEntries().first)
+        if case .dictation(let record) = timeline {
+            #expect(record.originalText == original)
+        } else {
+            Issue.record("Expected dictation in timeline")
+        }
+
+        let outbound = try #require(try store.textRecordsNeedingSync().first)
+        #expect(outbound.text == output)
+        let otherDevice = try makeStore()
+        #expect(try otherDevice.upsertSyncedTextRecord(outbound))
+        #expect(try otherDevice.recentDictations().first?.originalText == nil)
+        #expect(try otherDevice.recentDictations().first?.rawText == output)
+    }
+
+    @Test("legacy dictation migration leaves unavailable originals empty")
+    func dictationOriginalMigration() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("muesli-original-legacy-\(UUID().uuidString).db")
+        var db: OpaquePointer?
+        #expect(sqlite3_open(url.path, &db) == SQLITE_OK)
+        let sql = """
+        CREATE TABLE dictations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL, duration_seconds REAL, raw_text TEXT,
+            app_context TEXT, word_count INTEGER NOT NULL DEFAULT 0,
+            started_at TEXT, ended_at TEXT
+        );
+        INSERT INTO dictations (timestamp, duration_seconds, raw_text, word_count)
+        VALUES ('2026-10-07T10:00:00Z', 2, 'Historical final text', 3);
+        """
+        #expect(sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(db)
+        let store = DictationStore(databaseURL: url)
+        try store.migrateIfNeeded()
+        try store.migrateIfNeeded()
+        let old = try #require(try store.recentDictations().first)
+        #expect(old.rawText == "Historical final text")
+        #expect(old.originalText == nil)
+        let now = Date()
+        let id = try store.insertDictation(
+            text: "New final text", originalText: "New original text", durationSeconds: 2,
+            startedAt: now.addingTimeInterval(-2), endedAt: now
+        )
+        #expect(try store.dictation(id: id)?.originalText == "New original text")
+    }
+
+    @Test("deleting dictations clears their original source", arguments: ["single", "all", "remote"])
+    func dictationDeletionClearsOriginal(method: String) throws {
+        let store = try makeStore()
+        let now = Date()
+        let id = try store.insertDictation(
+            text: "Final text", originalText: "Private source text", durationSeconds: 2,
+            startedAt: now.addingTimeInterval(-2), endedAt: now
+        )
+        if method == "single" {
+            try store.deleteDictation(id: id)
+        } else if method == "all" {
+            try store.clearDictations()
+        } else {
+            var tombstone = try #require(try store.textRecordsNeedingSync().first)
+            tombstone.isDeleted = true
+            tombstone.text = ""
+            tombstone.updatedAt = Date().addingTimeInterval(60)
+            #expect(try store.upsertSyncedTextRecord(tombstone))
+        }
+        #expect(try store.dictation(id: id) == nil)
+        var db: OpaquePointer?
+        #expect(sqlite3_open(store.databasePath().path, &db) == SQLITE_OK)
+        defer { sqlite3_close(db) }
+        var statement: OpaquePointer?
+        #expect(sqlite3_prepare_v2(db, "SELECT original_text FROM dictations WHERE id = ?", -1, &statement, nil) == SQLITE_OK)
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_int64(statement, 1, id)
+        #expect(sqlite3_step(statement) == SQLITE_ROW)
+        #expect(sqlite3_column_type(statement, 0) == SQLITE_NULL)
+    }
+
     @Test("CloudKit engine state persists independently by key")
     func cloudSyncEngineStatePersistence() throws {
         let store = try makeStore()

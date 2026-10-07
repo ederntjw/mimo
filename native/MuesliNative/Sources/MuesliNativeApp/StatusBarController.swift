@@ -142,6 +142,26 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.setSubmenu(recentMenu, for: recentItem)
         menu.addItem(recentItem)
 
+        if controller.config.usesSimpleBilingualSetup {
+            let languageItem = NSMenuItem(title: "Chinese & English", action: nil, keyEquivalent: "")
+            languageItem.isEnabled = false
+            menu.addItem(languageItem)
+            let setupItem = NSMenuItem(title: "Transcription & notes: Automatic", action: nil, keyEquivalent: "")
+            setupItem.isEnabled = false
+            menu.addItem(setupItem)
+        } else {
+            addModelSelectionItems()
+        }
+
+        menu.addItem(.separator())
+        menu.addItem(actionItem(title: "Settings…", action: #selector(MuesliController.openSettingsTab)))
+        menu.addItem(actionItem(title: "What's New in \(AppIdentity.displayName)", action: #selector(MuesliController.showWhatsNew)))
+        menu.addItem(checkForUpdatesItem())
+        menu.addItem(.separator())
+        menu.addItem(actionItem(title: "Quit", action: #selector(MuesliController.quitApp)))
+    }
+
+    private func addModelSelectionItems() {
         let dictationModelItem = NSMenuItem(title: "Dictation Model", action: nil, keyEquivalent: "")
         let dictationModelMenu = NSMenu()
         dictationModelMenu.addItem(.sectionHeader(title: "Local"))
@@ -230,12 +250,6 @@ final class StatusBarController: NSObject, NSMenuDelegate {
         menu.setSubmenu(meetingBackendMenu, for: meetingBackendItem)
         menu.addItem(meetingBackendItem)
 
-        menu.addItem(.separator())
-        menu.addItem(actionItem(title: "Settings…", action: #selector(MuesliController.openSettingsTab)))
-        menu.addItem(actionItem(title: "What's New in \(AppIdentity.displayName)", action: #selector(MuesliController.showWhatsNew)))
-        menu.addItem(checkForUpdatesItem())
-        menu.addItem(.separator())
-        menu.addItem(actionItem(title: "Quit", action: #selector(MuesliController.quitApp)))
     }
 
     private func addUpcomingEventsSection(_ events: [UnifiedCalendarEvent]) {

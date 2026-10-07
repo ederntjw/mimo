@@ -6,57 +6,87 @@ struct StatsHeaderView: View {
     let meetingStats: MeetingStats
     var showsMeetingStat = true
     var tracksInsightsFeatureTour = false
+    var horizontalPadding: CGFloat = MuesliTheme.spacing24
     let onSelect: (InsightsSection) -> Void
 
-    @ViewBuilder
-    var body: some View {
-        if tracksInsightsFeatureTour {
-            cards
-                .featureTourTarget(.insightsEntry)
-        } else {
-            cards
-        }
+    private struct Metric: Identifiable {
+        let section: InsightsSection
+        let value: String
+        let label: String
+        let accessibilityHint: String
+
+        var id: InsightsSection { section }
     }
 
-    private var cards: some View {
-        HStack(spacing: MuesliTheme.spacing16) {
-            StatCard(
-                icon: "flame.fill",
-                iconColor: Color(hex: 0xF5A623),
+    private var metrics: [Metric] {
+        var result = [
+            Metric(
+                section: .streak,
                 value: "\(dictationStats.currentStreakDays)",
                 label: "day streak",
-                accessibilityHint: "Open streak insights",
-                action: { onSelect(.streak) }
-            )
-            StatCard(
-                icon: "character.cursor.ibeam",
-                iconColor: MuesliTheme.accent,
+                accessibilityHint: "Open streak insights"
+            ),
+            Metric(
+                section: .words,
                 value: formatWordCount(dictationStats.totalWords),
                 label: "words dictated",
-                accessibilityHint: "Open word activity insights",
-                action: { onSelect(.words) }
-            )
-            StatCard(
-                icon: "gauge.with.dots.needle.33percent",
-                iconColor: MuesliTheme.success,
+                accessibilityHint: "Open word activity insights"
+            ),
+            Metric(
+                section: .pace,
                 value: String(format: "%.0f", dictationStats.averageWPM),
-                label: "avg WPM",
-                accessibilityHint: "Open speaking pace insights",
-                action: { onSelect(.pace) }
-            )
-            if showsMeetingStat {
-                StatCard(
-                    icon: "person.2.fill",
-                    iconColor: MuesliTheme.accent,
-                    value: "\(meetingStats.totalMeetings)",
-                    label: "meetings",
-                    accessibilityHint: "Open meeting insights",
-                    action: { onSelect(.meetings) }
-                )
+                label: "words / min",
+                accessibilityHint: "Open speaking pace insights"
+            ),
+        ]
+        if showsMeetingStat {
+            result.append(Metric(
+                section: .meetings,
+                value: "\(meetingStats.totalMeetings)",
+                label: "meetings",
+                accessibilityHint: "Open meeting insights"
+            ))
+        }
+        return result
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 0) {
+                ForEach(Array(metrics.enumerated()), id: \.element.id) { index, metric in
+                    if index > 0 {
+                        Rectangle()
+                            .fill(MuesliTheme.surfaceBorder)
+                            .frame(width: 1, height: 30)
+                            .padding(.horizontal, MuesliTheme.spacing8)
+                    }
+                    metricButton(metric)
+                        .frame(minWidth: 110, maxWidth: .infinity)
+                }
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 110), spacing: MuesliTheme.spacing12)],
+                alignment: .leading,
+                spacing: MuesliTheme.spacing12
+            ) {
+                ForEach(metrics) { metric in
+                    metricButton(metric)
+                }
             }
         }
-        .padding(.horizontal, MuesliTheme.spacing24)
-        .padding(.vertical, MuesliTheme.spacing20)
+        .padding(.vertical, MuesliTheme.spacing16)
+        .padding(.horizontal, horizontalPadding)
+        .featureTourTarget(tracksInsightsFeatureTour ? .insightsEntry : nil)
+    }
+
+    private func metricButton(_ metric: Metric) -> some View {
+        CompactStatButton(
+            value: metric.value,
+            label: metric.label,
+            accessibilityHint: metric.accessibilityHint,
+            action: { onSelect(metric.section) }
+        )
     }
 
     private func formatWordCount(_ count: Int) -> String {
@@ -67,9 +97,7 @@ struct StatsHeaderView: View {
     }
 }
 
-private struct StatCard: View {
-    let icon: String
-    let iconColor: Color
+private struct CompactStatButton: View {
     let value: String
     let label: String
     let accessibilityHint: String
@@ -79,27 +107,23 @@ private struct StatCard: View {
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: MuesliTheme.spacing8) {
-                Image(systemName: icon)
-                    .font(.system(size: 20))
-                    .foregroundStyle(iconColor)
+            VStack(alignment: .leading, spacing: MuesliTheme.spacing4) {
                 Text(value)
-                    .font(MuesliTheme.title2())
+                    .font(MuesliTheme.displayTitle(26))
                     .monospacedDigit()
                     .foregroundStyle(MuesliTheme.textPrimary)
                     .contentTransition(.numericText())
                 Text(label)
                     .font(MuesliTheme.caption())
-                    .foregroundStyle(MuesliTheme.textTertiary)
+                    .foregroundStyle(MuesliTheme.textSecondary)
+                    .lineLimit(1)
             }
-            .frame(maxWidth: .infinity)
-            .padding(MuesliTheme.spacing16)
-            .background(isHovered ? MuesliTheme.backgroundHover : MuesliTheme.backgroundRaised)
-            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium))
-            .overlay(
-                RoundedRectangle(cornerRadius: MuesliTheme.cornerMedium)
-                    .strokeBorder(isHovered ? MuesliTheme.accent.opacity(0.38) : MuesliTheme.surfaceBorder, lineWidth: 1)
-            )
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, MuesliTheme.spacing12)
+            .padding(.vertical, MuesliTheme.spacing8)
+            .background(isHovered ? MuesliTheme.backgroundHover : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
+            .contentShape(RoundedRectangle(cornerRadius: MuesliTheme.cornerSmall))
         }
         .buttonStyle(InsightsStatButtonStyle(reduceMotion: reduceMotion))
         .onHover { hovering in

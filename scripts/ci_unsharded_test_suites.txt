@@ -62,7 +62,6 @@ MenuBarIconRendererTests
 MicTurnNormalizerTests
 MuesliBridgeDeviceIdentityTests
 MuesliBridgeDeviceRefreshPolicyTests
-OnboardingFlowTests
 OnboardingProgressTests
 PCMChunkRecorderTests
 PostProcessorOptionTests

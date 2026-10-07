@@ -16,6 +16,56 @@ struct ConfigStoreTests {
         #expect(!config.sttBackend.isEmpty)
     }
 
+    @Test("a fresh profile uses the single bilingual speech setup")
+    func freshProfileUsesSimpleBilingualSetup() {
+        let supportDirectory = makeSupportDirectory(label: "fresh-bilingual")
+        defer { try? FileManager.default.removeItem(at: supportDirectory) }
+        let store = ConfigStore(supportDirectory: supportDirectory)
+
+        let config = store.load()
+
+        #expect(config.usesSimpleBilingualSetup)
+        #expect(!config.darkMode)
+        #expect(!config.enableScreenContext)
+        #expect(!config.enableDictationOCRContext)
+        #expect(config.sttBackend == BackendOption.whisperLargeV3.backend)
+        #expect(config.sttModel == BackendOption.whisperLargeV3.model)
+        #expect(config.meetingTranscriptionModel == BackendOption.whisperLargeV3.model)
+        #expect(config.dictationProvider == DictationProvider.local.rawValue)
+        #expect(config.meetingSummaryBackend == MeetingSummaryBackendOption.chatGPT.backend)
+        #expect(config.whisperLanguage == WhisperKitLanguage.auto.rawValue)
+        store.save(config)
+        #expect(store.load().usesSimpleBilingualSetup)
+    }
+
+    @Test("an existing profile without the new flag retains its provider choices")
+    func legacyProfileDoesNotOptIntoCloudWriting() throws {
+        let supportDirectory = makeSupportDirectory(label: "legacy-bilingual")
+        defer { try? FileManager.default.removeItem(at: supportDirectory) }
+        try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+        let store = ConfigStore(supportDirectory: supportDirectory)
+        let legacyJSON = #"{"stt_backend":"parakeet-unified","meeting_summary_backend":"ollama","post_processor_backend":"local","enable_post_processor":false}"#
+        try Data(legacyJSON.utf8).write(to: store.configPath())
+
+        let config = store.load()
+
+        #expect(!config.usesSimpleBilingualSetup)
+        #expect(config.sttBackend == "parakeet-unified")
+        #expect(config.meetingSummaryBackend == "ollama")
+        #expect(config.postProcessorBackend == "local")
+        #expect(!config.enablePostProcessor)
+    }
+
+    @Test("an unreadable existing profile is not treated as a new simple profile")
+    func existingCorruptProfileDoesNotOptIn() throws {
+        let supportDirectory = makeSupportDirectory(label: "corrupt-bilingual")
+        defer { try? FileManager.default.removeItem(at: supportDirectory) }
+        try FileManager.default.createDirectory(at: supportDirectory, withIntermediateDirectories: true)
+        let store = ConfigStore(supportDirectory: supportDirectory)
+        try Data("invalid json".utf8).write(to: store.configPath())
+        #expect(!store.load().usesSimpleBilingualSetup)
+    }
+
     @Test("save and load round-trip")
     func saveLoadRoundTrip() throws {
         let supportDirectory = makeSupportDirectory(label: "roundtrip")

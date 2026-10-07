@@ -366,6 +366,7 @@ public final class MuesliController: NSObject {
     private static let dictionaryCorrectionAccessibilityIntentTimeout: TimeInterval = 24 * 60 * 60
     private let runtime: RuntimePaths
     private let configStore: ConfigStore
+    let snippetStore: SpokenSnippetStore
     private let dictationStore: DictationStore
     private let meetingHookDispatcher: MeetingHookDispatching
     private let meetingMarkdownAutoExporter: MeetingMarkdownAutoExporting
@@ -596,10 +597,12 @@ public final class MuesliController: NSObject {
         mimoAccountAPI: (any MimoAccountAPIProtocol)? = nil
     ) {
         self.configStore = configStore
+        self.snippetStore = SpokenSnippetStore(supportDirectory: configStore.supportDirectory())
         self.chatGPTAuth = chatGPTAuth ?? .shared
         self.openRouterAuth = openRouterAuth ?? .shared
         self.openRouterModelCatalogClient = openRouterModelCatalogClient
         var loadedConfig = configStore.load()
+        loadedConfig.applySimpleBilingualSetupIfNeeded()
         let loadedBackend = BackendOption.all.first(where: {
             $0.backend == loadedConfig.sttBackend && $0.model == loadedConfig.sttModel
         }) ?? .whisper
@@ -658,7 +661,8 @@ public final class MuesliController: NSObject {
             configured: configuredMeetingBackend,
             dictationBackend: self.selectedBackend,
             chineseEnglishBilingual: loadedConfig.meetingChineseEnglishBilingual,
-            finalPassEnabled: loadedConfig.meetingFinalPassEnabled
+            finalPassEnabled: loadedConfig.meetingFinalPassEnabled,
+            usesSimpleBilingualSetup: loadedConfig.usesSimpleBilingualSetup
         )
         self.selectedMeetingSummaryBackend = MeetingSummaryBackendOption.all.first(where: {
             $0.backend == loadedConfig.meetingSummaryBackend
@@ -1500,6 +1504,10 @@ public final class MuesliController: NSObject {
         dictationBackend: BackendOption,
         downloadedOptions: [BackendOption] = BackendOption.downloaded
     ) -> BackendOption? {
+        if config.usesSimpleBilingualSetup {
+            let backend = SimpleBilingualSetup.transcriptionBackend
+            return downloadedOptions.contains(backend) ? backend : nil
+        }
         if config.meetingFinalPassEnabled {
             return downloadedOptions.contains(.senseVoiceSmall) ? .senseVoiceSmall : nil
         }
@@ -1526,8 +1534,12 @@ public final class MuesliController: NSObject {
         configured: BackendOption?,
         dictationBackend: BackendOption,
         chineseEnglishBilingual: Bool,
-        finalPassEnabled: Bool
+        finalPassEnabled: Bool,
+        usesSimpleBilingualSetup: Bool = false
     ) -> BackendOption {
+        // Keep the intended engine visible when setup is incomplete. Availability
+        // checks block recording rather than substituting a smaller model.
+        if usesSimpleBilingualSetup { return SimpleBilingualSetup.transcriptionBackend }
         if finalPassEnabled { return .senseVoiceSmall }
         if chineseEnglishBilingual {
             // Presentation-only when no safe model is installed. Recording still
@@ -1564,7 +1576,8 @@ public final class MuesliController: NSObject {
                 ),
                 dictationBackend: dictationBackend,
                 chineseEnglishBilingual: config.meetingChineseEnglishBilingual,
-                finalPassEnabled: config.meetingFinalPassEnabled
+                finalPassEnabled: config.meetingFinalPassEnabled,
+                usesSimpleBilingualSetup: config.usesSimpleBilingualSetup
             )
             appState.selectedMeetingTranscriptionBackend = selectedMeetingTranscriptionBackend
             appState.config = config
@@ -1586,15 +1599,17 @@ public final class MuesliController: NSObject {
     }
 
     @discardableResult
-    func refreshMeetingTranscriptionSelectionForAvailability() -> BackendOption? {
-        normalizeMeetingTranscriptionSelectionForAvailability()
+    func refreshMeetingTranscriptionSelectionForAvailability(
+        downloadedOptions: [BackendOption] = BackendOption.downloaded
+    ) -> BackendOption? {
+        normalizeMeetingTranscriptionSelectionForAvailability(downloadedOptions: downloadedOptions)
     }
 
     @discardableResult
     private func normalizeLiveMeetingTranscriptionSelectionForAvailability(
         availableOptions: [BackendOption] = BackendOption.downloaded
     ) -> BackendOption? {
-        if config.meetingFinalPassEnabled {
+        if config.usesSimpleBilingualSetup || config.meetingFinalPassEnabled {
             return normalizeMeetingTranscriptionSelectionForAvailability(downloadedOptions: availableOptions)
         }
         let configured = BackendOption.resolve(
@@ -1636,6 +1651,7 @@ public final class MuesliController: NSObject {
         let previousEnableDictionaryCorrectionPrompts = config.enableDictionaryCorrectionPrompts
         let previousEnableLiveStreamingPartials = config.meetingLiveStreamingPartialsEnabled
         mutate(&config)
+        config.applySimpleBilingualSetupIfNeeded()
         if previousEnableLiveStreamingPartials, !config.meetingLiveStreamingPartialsEnabled {
             preparingMeetingSession?.stopStreamingPartials()
             activeMeetingSession?.stopStreamingPartials()
@@ -1685,7 +1701,8 @@ public final class MuesliController: NSObject {
             configured: configuredMeetingTranscriptionBackend,
             dictationBackend: selectedBackend,
             chineseEnglishBilingual: config.meetingChineseEnglishBilingual,
-            finalPassEnabled: config.meetingFinalPassEnabled
+            finalPassEnabled: config.meetingFinalPassEnabled,
+            usesSimpleBilingualSetup: config.usesSimpleBilingualSetup
         )
         if !config.meetingFinalPassEnabled && (config.meetingTranscriptionBackend != selectedMeetingTranscriptionBackend.backend ||
             config.meetingTranscriptionModel != selectedMeetingTranscriptionBackend.model) {
@@ -3210,6 +3227,7 @@ public final class MuesliController: NSObject {
         _ option: BackendOption,
         makePrimaryDictationModel: Bool
     ) {
+        guard !config.usesSimpleBilingualSetup || option == SimpleBilingualSetup.transcriptionBackend else { return }
         let replacesGemmaCleanup = !selectedPostProcessorBackend.isCompatible(with: option)
         let hasLocalCleanupModel = PostProcessorOption.runtimeOption(id: config.activePostProcessorId) != nil
         updateConfig {
@@ -3269,6 +3287,7 @@ public final class MuesliController: NSObject {
     }
 
     func selectDictationProvider(_ provider: DictationProvider) {
+        guard !config.usesSimpleBilingualSetup || provider == .local else { return }
         guard provider != selectedDictationProvider else { return }
         guard canChangePrimaryDictationModel() else { return }
         updateConfig { $0.dictationProvider = provider.rawValue }
@@ -3348,6 +3367,7 @@ public final class MuesliController: NSObject {
     }
 
     private func prepareDictationBackend(_ backend: BackendOption) async -> Bool {
+        guard !config.usesSimpleBilingualSetup || backend == SimpleBilingualSetup.transcriptionBackend else { return false }
         do {
             try await transcriptionCoordinator.preloadRequired(
                 backend: backend,
@@ -3390,6 +3410,7 @@ public final class MuesliController: NSObject {
     }
 
     func selectMeetingFinalTranscriptionBackend(_ option: BackendOption) {
+        guard !config.usesSimpleBilingualSetup || option == SimpleBilingualSetup.transcriptionBackend else { return }
         guard !isMeetingRecording(), !isStartingMeetingRecording,
               MeetingTranscriptionPlan.finalModels.contains(option) else { return }
         // Persist the exact choice, including before download; start checks both
@@ -3398,6 +3419,7 @@ public final class MuesliController: NSObject {
     }
 
     func selectMeetingTranscriptionBackend(_ option: BackendOption, requireDownloaded: Bool = true) {
+        guard !config.usesSimpleBilingualSetup else { return }
         guard !config.meetingFinalPassEnabled else { return }
         guard !config.meetingChineseEnglishBilingual || option.supportsChineseEnglishMeetingTranscription else {
             presentErrorAlert(
@@ -3593,6 +3615,7 @@ public final class MuesliController: NSObject {
     }
 
     func selectPostProcessor(_ option: PostProcessorOption) {
+        guard !config.usesSimpleBilingualSetup else { return }
         guard option.isCompatible(with: selectedBackend) else {
             presentErrorAlert(
                 title: "Cleanup model unavailable",
@@ -3615,6 +3638,7 @@ public final class MuesliController: NSObject {
     }
 
     func selectPostProcessorBackend(_ option: TranscriptCleanupBackendOption) {
+        guard !config.usesSimpleBilingualSetup || option == .hosted(.chatGPT) else { return }
         guard option.isCompatible(with: selectedBackend) else {
             presentErrorAlert(
                 title: "Cleanup model unavailable",
@@ -3644,6 +3668,7 @@ public final class MuesliController: NSObject {
     }
 
     func selectGemma4PostProcessor(_ model: Gemma4LiteRTModel) {
+        guard !config.usesSimpleBilingualSetup else { return }
         guard TranscriptCleanupBackendOption.gemma4LiteRT.isCompatible(with: selectedBackend) else {
             presentErrorAlert(
                 title: "Cleanup model unavailable",
@@ -3738,6 +3763,7 @@ public final class MuesliController: NSObject {
     }
 
     func selectMeetingSummaryBackend(_ option: MeetingSummaryBackendOption) {
+        guard !config.usesSimpleBilingualSetup || option == .chatGPT else { return }
         updateConfig {
             $0.meetingSummaryBackend = option.backend
         }
@@ -3831,7 +3857,7 @@ public final class MuesliController: NSObject {
 
     func signOutChatGPT() {
         chatGPTAuth.signOut()
-        if selectedMeetingSummaryBackend == .chatGPT {
+        if selectedMeetingSummaryBackend == .chatGPT, !config.usesSimpleBilingualSetup {
             selectMeetingSummaryBackend(.openAI)
         }
         syncAppState()
@@ -5095,6 +5121,7 @@ public final class MuesliController: NSObject {
         progress: @escaping (Double, String?) -> Void,
         progressSnapshot: ModelDownloadProgressHandler? = nil
     ) async throws {
+        let backend = config.usesSimpleBilingualSetup ? SimpleBilingualSetup.transcriptionBackend : backend
         let wasDownloaded = backend.isDownloaded
         progress(
             wasDownloaded ? 0.75 : 0.0,
@@ -5182,7 +5209,7 @@ public final class MuesliController: NSObject {
                 appState.isModelPreparingAfterDownload = false
                 appState.modelPreparationIsComplete = false
             }
-        } else if !isPreparing && progress == nil {
+        } else if !isPreparing && progress == nil && !config.usesSimpleBilingualSetup {
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(12))
                 guard appState.modelPreparationTitle == title,
@@ -5196,7 +5223,10 @@ public final class MuesliController: NSObject {
     }
 
     private func modelPreparationFailureMessage(for backend: BackendOption) -> String {
-        backend.isDownloaded
+        if config.usesSimpleBilingualSetup {
+            return "Speech setup failed. Open Speech & notes to retry."
+        }
+        return backend.isDownloaded
             ? "Model setup failed. Restart Mimo or retry from Models."
             : "Download failed. Check your connection and retry."
     }
@@ -5605,6 +5635,7 @@ public final class MuesliController: NSObject {
     }
 
     @objc func selectOpenAIDictationModelFromMenu(_ sender: NSMenuItem) {
+        guard !config.usesSimpleBilingualSetup else { return }
         guard let model = sender.representedObject as? String else { return }
         let normalizedModel = OpenAITranscriptionClient.normalizeModel(model)
         guard selectedDictationProvider != .openAI
@@ -5619,6 +5650,7 @@ public final class MuesliController: NSObject {
     }
 
     @objc func selectOpenRouterDictationModelFromMenu(_ sender: NSMenuItem) {
+        guard !config.usesSimpleBilingualSetup else { return }
         guard let model = sender.representedObject as? String else { return }
         let normalizedModel = OpenRouterTranscriptionClient.normalizedModel(model)
         guard !normalizedModel.isEmpty else { return }
@@ -5752,6 +5784,11 @@ public final class MuesliController: NSObject {
                 let configured = processingConfig.meetingFinalPassEnabled
                     ? processingConfig.resolvedMeetingFinalBackend
                     : self.selectedMeetingTranscriptionBackend
+                guard !processingConfig.usesSimpleBilingualSetup
+                        || requestedBackend == nil
+                        || requestedBackend == SimpleBilingualSetup.transcriptionBackend else {
+                    throw MeetingRetranscriptionError.noDownloadedTranscriptionModel
+                }
                 guard let backend = MeetingRetranscriptionPolicy.resolveModel(
                     requested: requestedBackend,
                     configured: configured,
@@ -6677,7 +6714,9 @@ public final class MuesliController: NSObject {
         guard normalizeLiveMeetingTranscriptionSelectionForAvailability() != nil else {
             presentErrorAlert(
                 title: "Live Meeting needs a local transcriber",
-                message: config.meetingChineseEnglishBilingual
+                message: config.usesSimpleBilingualSetup
+                    ? "Prepare speech in Speech & notes, then try again."
+                    : config.meetingChineseEnglishBilingual
                     ? "Download SenseVoice Small or a multilingual Whisper model in Models, then try again."
                     : "Download a Parakeet or multilingual Whisper model in Models, or use Apple Speech on a supported Mac."
             )
@@ -6696,7 +6735,9 @@ public final class MuesliController: NSObject {
         guard normalizeLiveMeetingTranscriptionSelectionForAvailability() != nil else {
             presentErrorAlert(
                 title: "Live Lecture needs a local transcriber",
-                message: config.meetingChineseEnglishBilingual
+                message: config.usesSimpleBilingualSetup
+                    ? "Prepare speech in Speech & notes, then try again."
+                    : config.meetingChineseEnglishBilingual
                     ? "Download SenseVoice Small or a multilingual Whisper model in Models, then try again."
                     : "Download a Parakeet or multilingual Whisper model in Models, or use Apple Speech on a supported Mac."
             )
@@ -6763,8 +6804,10 @@ public final class MuesliController: NSObject {
         let missing = plan.missingModels(from: BackendOption.downloaded)
         guard !missing.isEmpty else { return true }
         presentErrorAlert(
-            title: "Meeting models needed",
-            message: "Download \(missing.map(\.label).joined(separator: " and ")) in Models before recording. Mimo uses SenseVoice for live captions and \(config.resolvedMeetingFinalBackend.label) to review the full recording afterward."
+            title: config.usesSimpleBilingualSetup ? "Speech setup needed" : "Meeting models needed",
+            message: config.usesSimpleBilingualSetup
+                ? "Open Speech & notes and prepare speech on this Mac before recording. Your chosen transcription setup will be used throughout the meeting."
+                : "Download \(missing.map(\.label).joined(separator: " and ")) in Models before recording. Mimo uses SenseVoice for live captions and \(config.resolvedMeetingFinalBackend.label) to review the full recording afterward."
         )
         return false
     }
@@ -10207,6 +10250,14 @@ public final class MuesliController: NSObject {
         selectedDictationProvider.usesStreamingBackend(selectedBackend)
     }
 
+    /// Whole-utterance snippets must resolve before typing any source words.
+    /// Nemotron's existing buffered path supports the same handsfree recording
+    /// while letting the standard completion pipeline expand and paste once.
+    var shouldStreamDictationAtCursor: Bool {
+        isStreamingDictationBackend
+            && (isDictationTestMode || snippetStore.loadError != nil || snippetStore.snippets.isEmpty)
+    }
+
     private func ensureDictationBackendReady() -> Bool {
         guard !isDictationTestMode else { return true }
         if let message = HostedDictationActivationPolicy.blockingMessage(
@@ -10989,8 +11040,8 @@ public final class MuesliController: NSObject {
         captureDictationCorrectionTargetApp()
         setState(.preparing)
 
-        // Nemotron streaming: live text at cursor in handsfree mode too
-        if isStreamingDictationBackend {
+        // A saved snippet needs the complete utterance before any text is inserted.
+        if shouldStreamDictationAtCursor {
             if #available(macOS 15, *) {
                 let sessionID = UUID()
                 isNemotron35Streaming = true
@@ -11216,6 +11267,7 @@ public final class MuesliController: NSObject {
         if !cleaned.isEmpty {
             _ = try? dictationStore.insertDictation(
                 text: cleaned,
+                originalText: finalText,
                 durationSeconds: duration,
                 targetAppName: targetApp?.appName,
                 targetAppBundleID: targetApp?.bundleID,
@@ -11252,6 +11304,7 @@ public final class MuesliController: NSObject {
     /// ownership of the clipboard or the visible Transcribing state.
     private func finishStandardDictationBookkeeping(
         text: String,
+        originalText: String?,
         duration: TimeInterval,
         appContext: String,
         startedAt: Date,
@@ -11261,6 +11314,7 @@ public final class MuesliController: NSObject {
     ) {
         _ = try? dictationStore.insertDictation(
             text: text,
+            originalText: originalText,
             durationSeconds: duration,
             appContext: appContext,
             targetAppName: targetApp?.appName,
@@ -11321,6 +11375,7 @@ public final class MuesliController: NSObject {
         let completionLatencyTrace = currentDictationLatencyTrace
         syncDictationRecorderWarmup(intent: .postDictation(.dictationStop))
         let isTestMode = isDictationTestMode
+        let spokenSnippets = isTestMode || snippetStore.loadError != nil ? [] : snippetStore.snippets
         let outputMode = currentDictationOutputMode
         // Test mode always exercises the selected local model. Normal dictation
         // uses the configured provider while retaining the local selection for
@@ -11356,13 +11411,18 @@ public final class MuesliController: NSObject {
 
             do {
                 let rawText: String
+                let originalText: String?
+                let isSnippetExpansion: Bool
                 let completionBackend: String
                 if let hostedSession {
                     do {
                         // Hosted transcription models already produce normalized
                         // prose, so hosted success intentionally bypasses cleanup.
                         let result = try await hostedSession.finish(recordedWAVURL: wavURL)
-                        rawText = result.text
+                        let expansion = SpokenSnippetMatcher.expansion(for: result.text, snippets: spokenSnippets)
+                        rawText = expansion ?? result.text
+                        originalText = expansion == nil ? nil : result.text
+                        isSnippetExpansion = expansion != nil
                         completionBackend = result.backend
                     } catch {
                         guard HostedDictationFallbackPolicy.shouldFallback(
@@ -11392,9 +11452,12 @@ public final class MuesliController: NSObject {
                             appleSpeechLanguage: self.config.resolvedAppleSpeechLanguage,
                             enablePostProcessor: self.canRunTranscriptCleanup(option: ppOption),
                             customWords: self.serializedCustomWords(),
-                            appContext: promptContext
+                            appContext: promptContext,
+                            spokenSnippets: spokenSnippets
                         )
                         rawText = result.text
+                        originalText = result.originalText
+                        isSnippetExpansion = result.isSnippetExpansion
                         completionBackend = fallbackBackend.backend
                     }
                 } else {
@@ -11411,9 +11474,12 @@ public final class MuesliController: NSObject {
                         appleSpeechLanguage: self.config.resolvedAppleSpeechLanguage,
                         enablePostProcessor: self.canRunTranscriptCleanup(option: ppOption),
                         customWords: self.serializedCustomWords(),
-                        appContext: promptContext
+                        appContext: promptContext,
+                        spokenSnippets: spokenSnippets
                     )
                     rawText = result.text
+                    originalText = result.originalText
+                    isSnippetExpansion = result.isSnippetExpansion
                     completionBackend = transcriptionBackend.backend
                 }
                 // Drop result if test was cancelled (user navigated away)
@@ -11421,7 +11487,7 @@ public final class MuesliController: NSObject {
                 guard isTestMode || self.isCurrentDictationTranscription(id: transcriptionTaskID) else {
                     return
                 }
-                let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+                let text = isSnippetExpansion ? rawText : rawText.trimmingCharacters(in: .whitespacesAndNewlines)
                 await MainActor.run {
                     self.markDictationLatency("transcription_completed", trace: completionLatencyTrace)
                 }
@@ -11486,6 +11552,7 @@ public final class MuesliController: NSObject {
                                 guard let self else { return }
                                 self.finishStandardDictationBookkeeping(
                                     text: text,
+                                    originalText: originalText,
                                     duration: duration,
                                     appContext: storageContext,
                                     startedAt: startedAt,
@@ -11510,6 +11577,7 @@ public final class MuesliController: NSObject {
                         self.markDictationLatency("user_visible_completion", trace: completionLatencyTrace)
                         self.finishStandardDictationBookkeeping(
                             text: text,
+                            originalText: originalText,
                             duration: duration,
                             appContext: storageContext,
                             startedAt: startedAt,

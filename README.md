@@ -15,8 +15,10 @@ in-person and online meetings as they happen, maintains a rolling brief, and let
 you ask questions about what has already been said without stopping the recording.
 
 It also handles everyday dictation, voice-directed text editing, and transcription
-of existing audio or video files. Speech recognition can stay on your Mac; the
-reasoning provider for summaries, questions, and cleanup is your choice.
+of existing audio or video files. New installations use one Chinese–English setup:
+full Whisper Large v3 transcribes on your Mac, and your connected ChatGPT account
+handles cleanup, notes, and questions. There are no model selectors to manage.
+Existing installations retain their previous provider settings until they opt in.
 
 Mimo runs on Apple silicon Macs. The macOS app is the current focus; companion
 apps follow the desktop workflow.
@@ -38,24 +40,23 @@ apps follow the desktop workflow.
 Mimo is designed around one important constraint: asking a question or refreshing
 notes must never pause capture.
 
-1. In **Settings → Meetings**, choose the after-meeting model. Download SenseVoice
-   Small and that model from **Models**, then choose **Start Live Meeting**.
+1. Prepare the speech model in **Speech & notes**, connect your ChatGPT account,
+   then choose **Start a meeting**.
 2. Mimo records the room through your microphone. For an online call, it can also
    capture the other side through macOS system audio.
-3. SenseVoice Small supplies live Mandarin–English text in short batches, including
-   language switches.
+3. Full Whisper Large v3 supplies Mandarin–English text in batches with automatic
+   language detection. Capture continues while each batch is processed.
 4. The live brief refreshes as enough new context arrives.
 5. Ask a question such as “What deadline did we agree on?” Mimo answers from the
    transcript collected up to that moment while recording keeps running.
-6. Stop when the conversation ends. The selected Whisper model transcribes the
+6. Stop when the conversation ends. The same Whisper model transcribes the
    complete recording, then Mimo compares it with the live draft before generating
    English minutes. A transcript-review section flags differences to confirm.
 
-The reviewed workflow is enabled by default, with full Whisper Large v3 selected
-for the final pass. Whisper Large Turbo is the faster, smaller alternative. Both
-meeting models must be downloaded before recording; Mimo does not silently swap
-the final model. Your recording-save preference controls whether audio is retained
-after processing. See the [model guide](docs/model-guide.md) for requirements.
+The simple setup uses full Whisper Large v3 for dictation, live meeting batches,
+and the final pass. Prepare this one model before recording. Mimo does not silently
+substitute a smaller model. Your recording-save preference controls whether audio
+is retained after processing. See the [model guide](docs/model-guide.md) for requirements.
 
 No meeting bot has to join the room. In-person meetings need only microphone access;
 online capture additionally uses macOS System Audio Recording permission.
@@ -92,8 +93,10 @@ diarization, note-generation, search, and export pipeline as a live meeting.
 ### Dictation
 
 Hold the dictation hotkey, speak, and release. Mimo transcribes and pastes into the
-active app. Hands-free double-tap mode, a personal dictionary, filler-word removal,
-and optional cleanup are available when you need them.
+active app. Hands-free double-tap mode, a personal dictionary, and spoken snippets
+are available. Cleanup has None, Light, and Medium strengths; new dictations keep
+their original text locally so you can recover wording before cleanup. Speak a
+snippet phrase on its own to insert its saved text exactly as written.
 
 ### Meeting memory
 
@@ -103,21 +106,20 @@ available even when the Mac is offline.
 
 ## Models and privacy
 
-Transcription and reasoning are separate choices in Mimo.
+The simple setup separates local speech recognition from connected writing.
 
-| Job | Recommended starting point | Other options |
-|---|---|---|
-| Live Mandarin–English meeting text | SenseVoice Small on-device | Reviewed meetings keep this live model separate from the final pass |
-| Final meeting transcription | Full Whisper Large v3 on-device | Whisper Large Turbo for a faster, smaller final pass |
-| English dictation | Parakeet Unified on-device | Other curated local models or a configured hosted dictation provider |
-| Meeting summaries and live Q&A | ChatGPT subscription sign-in | OpenAI or OpenRouter with an API key, Ollama, LM Studio, or a compatible custom endpoint |
-| Dictation transcript cleanup | Mimo Tiny Cleanup, bundled on-device | ChatGPT, hosted providers, or larger supported local models |
-| Quill voice editing | ChatGPT subscription or a general-purpose local model | OpenAI, OpenRouter, Ollama, LM Studio, or a custom endpoint |
+| Job | Simple Chinese–English setup |
+|---|---|
+| Dictation, live meeting batches, final transcription | Full Whisper Large v3 on this Mac |
+| Meeting summaries, live Q&A, and Quill | Connected ChatGPT subscription |
+| Dictation cleanup | ChatGPT, with Light cleanup by default; None skips the cleanup request |
 
-With an on-device transcription model, microphone audio is processed locally.
-If you select a hosted transcription provider, audio is sent to that provider. If
-you select ChatGPT or another hosted reasoning provider for summaries, questions,
-or cleanup, the relevant transcript or text is sent only for that requested task.
+Audio is transcribed locally. Cleanup, notes, questions, and rewrites need internet
+access and send the relevant text to ChatGPT. Optional nearby app/screen context is
+also sent when enabled. Connected Mimo Account sync uploads transcripts and notes;
+its controls remain available in **Settings → Privacy**.
+Existing users keep their previous model/provider setup and can opt in from
+**Models**. That switch explains the local speech and ChatGPT text processing first.
 Account sessions and provider credentials remain local, in macOS Keychain or
 permission-restricted local files, and are never part of Mimo Account sync.
 
@@ -146,7 +148,7 @@ installation therefore does not need another manual drag to Applications.
 Maintainers publish an update from a clean, CI-passing `main` branch with one tag:
 
 ```bash
-./scripts/publish_mimo_update.sh 0.8.8
+./scripts/publish_mimo_update.sh 0.9.0
 ```
 
 The tag-triggered GitHub workflow builds and signs the native Mac app with
@@ -168,12 +170,14 @@ release. Private keys are never committed to this repository.
 - Accessibility and Input Monitoring for global hotkeys and text insertion
 - System Audio Recording for online-meeting capture
 
-The application includes the roughly 235 MB Mimo Tiny Cleanup text model. Speech
-models download separately: SenseVoice Small is about 240 MB, full Whisper Large
-v3 about 3.1 GB, and Turbo about 626 MB. The default reviewed meeting workflow needs
-SenseVoice and full Large v3; you can explicitly select Turbo instead. English
-dictation's Parakeet Unified model is about 565 MB. The [model guide](docs/model-guide.md)
-distinguishes download sizes, working memory, and total Mac RAM recommendations.
+Full Whisper Large v3 downloads separately (about 3.1 GB). For the simple setup,
+Mimo recommends at least 16 GB total Mac RAM, preferably 24 GB, and 9 GB free disk
+for initial preparation. These are planning estimates; performance depends on
+your Mac and other running apps. ChatGPT writing needs a connected account with
+available usage. No local writing model is needed for this setup. The bundle still
+includes Mimo Tiny Cleanup for compatibility with existing local-only configurations.
+The [model guide](docs/model-guide.md) distinguishes download sizes, working memory,
+and total Mac RAM recommendations.
 
 ## Build and test
 
